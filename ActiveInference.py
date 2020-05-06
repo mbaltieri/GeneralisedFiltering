@@ -29,7 +29,7 @@ plt.rc('figure', titlesize=BIGGER_SIZE)     # fontsize of the figure title
 
 dt = .01
 
-gamma = 1                                                   # drift in OU process (if you want to simulate coloured noise)
+# gamma = 1                                                   # drift in OU process (if you want to simulate coloured noise)
 plt.close('all')
 small_value = np.exp(-50)
 MAX_TEMPORAL_ORDERS = 20
@@ -66,28 +66,22 @@ gamma_w = -3
 sigma_z = np.exp(-gamma_z)
 sigma_w = np.exp(-gamma_w)
 
-def FreeEnergy(y, mu_x, mu_v, mu_pi_z, mu_pi_w, A_gm, B_gm, F_gm):
-    return .5 * (np.sum(np.dot(np.dot((y - np.dot(F_gm, mu_x)).transpose(), mu_pi_z), (y - np.dot(F_gm, mu_x)))) + \
-                np.sum(np.dot(np.dot((mu_x[:, 1:] - f_gm(mu_x[:, :-1], mu_v[:, :-1], A_gm, B_gm)).transpose(), mu_pi_w), (mu_x[:, 1:] - f_gm(mu_x[:, :-1], mu_v[:, :-1], A_gm, B_gm)))) - \
-                np.trace(np.log(mu_pi_z * mu_pi_w)))
 
-
-def doubleIntAI(simulation, iterations, generative_process, generative_model):
+def GeneralisedFiltering(simulation, iterations, generative_process, generative_model):
     # environment variables (to be reset for each simulation)
 
-    obs_states = generative_process.obs_states
-    hidden_states = generative_process.hidden_states
-    hidden_causes = generative_process.hidden_causes
+    obs_states_n = generative_process.obs_states
+    hidden_states_n = generative_process.hidden_states
+    hidden_causes_n = generative_process.hidden_causes
 
-    obs_states_gm = generative_model.obs_states
+    obs_states_n_gm = generative_model.obs_states
     hidden_states_gm = generative_model.hidden_states
     hidden_causes_gm = generative_model.hidden_causes
 
-    x = np.zeros((hidden_states, 1))           # position
-    
-    v = np.zeros((hidden_causes, 1))
-    y = np.zeros((obs_states, 1))
-    eta = np.zeros((hidden_causes, embed_orders_states - 1))
+    y = np.zeros((obs_states_n, 1))                                             # observations
+    x = np.zeros((hidden_states_n, 1))                                          # hidden states
+    v = np.zeros((hidden_causes_n, 1))                                          # hidden causes
+    # eta = np.zeros((hidden_causes, embed_orders_states - 1))
 
     A_tilde = np.kron(np.eye(embed_orders_states), generative_process.A)
     B_tilde = np.kron(np.eye(embed_orders_causes), generative_process.B)
@@ -111,10 +105,10 @@ def doubleIntAI(simulation, iterations, generative_process, generative_model):
     a = np.zeros((1, embed_orders_states - 1))
     
     # states
-    mu_x = np.zeros((hidden_states_gm, 1))
+    mu_x = np.zeros((hidden_states_n_gm, 1))
     
     # inputs
-    mu_v = np.zeros((hidden_causes_gm, 1))
+    mu_v = np.zeros((hidden_causes_n_gm, 1))
     
     # minimisation variables and parameters
     dFdmu_x = np.zeros((hidden_states_gm, embed_orders_states_gm))
@@ -371,22 +365,6 @@ A_gm = np.array([[- alpha_1, 0, 0, 0], [0, - alpha_2, 0, 0], [0, 0, - beta_1, 0]
 B_gm = np.array([[1, 0], [0, 1], [0, 1], [1, 0]])                     # input matrix
 F_gm = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])               # measurement matrix
 G_gm = np.zeros((4, 2))
-
-class model():
-    def __init__(self, A, F, B=0, C=0, G=0, D=0):
-        self.A = A
-        self.B = B
-        self.C = C
-        self.F = F
-        self.G = G
-        self.D = D
-
-        self.obs_states = len(F)
-        self.hidden_states = len(A)
-        if np.ndim(B) > 0:
-            self.hidden_causes = len(B[0])
-        else:
-            self.hidden_causes = 1
 
 generative_model = model(A_gm, F_gm, B=B_gm, G=G_gm)
 generative_process = model(A, F, C=C, D=D)
