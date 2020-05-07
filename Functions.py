@@ -6,7 +6,12 @@ import matplotlib.pyplot as plt
 import scipy.linalg as splin
 from autograd import grad
 
+torch.set_default_dtype(torch.float64)
+
 ### FUNCTIONS ###
+
+def kronecker(A, B):
+    return torch.einsum("ab,cd->acbd", A, B).view(A.size(0)*B.size(0),  A.size(1)*B.size(1))
 
 def sigmoid(x):
 #    return x
@@ -76,13 +81,10 @@ def getObservation(x, v, w):
     return g(x, v)
                 
 
-def Diff(x, variables_n, embeddings_n):
-    D = np.eye(variables_n, k=1)
-    I = np.eye(embeddings_n)
-    D = np.kron(I, D)
-    res = D @ x
-    return res
-
+def Diff(x, dimension, embeddings, shift=1):
+    D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
+    return D @ x
+    
 
 def FreeEnergy(y, mu_x, mu_v, mu_pi_z, mu_pi_w, A_gm, B_gm, F_gm):
     return .5 * (np.sum(np.dot(np.dot((y - np.dot(F_gm, mu_x)).transpose(), mu_pi_z), (y - np.dot(F_gm, mu_x)))) + \
