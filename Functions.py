@@ -1,10 +1,8 @@
 # This module will contain general functions used for the inversion of generative models
 
 import torch
-import autograd.numpy as np                 # autograd now implemented in JAX, but still missing functions used here (December 2019)
-import matplotlib.pyplot as plt
-import scipy.linalg as splin
-from autograd import grad
+import autograd.numpy as np                 # autograd now implemented in JAX, can be replaced
+from autograd import grad                   # TODO: move this to pure pytorch
 
 torch.set_default_dtype(torch.float64)
 
@@ -58,28 +56,38 @@ def smoothnessMatrix(embedding_orders, phi):
 
     return torch.from_numpy(S)
 
-## free energy functions ##
-# generative process
-def g(x, v):
-    return F_tilde @ x + G_tilde @ v
 
-def f(x, v):
-    return np.dot(A_tilde, x) + np.dot(B_tilde, v)
-#    return np.dot(A, x) + np.dot(B, sigmoid(a)) + np.dot(B, v)
+def f(A, B, x, v):
+    # TODO: generalise this to include nonlinear treatments
+    try:
+        return A @ x + B @ v
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
 
-# generative model
-def g_gm(x, v, F_gm):
-    return np.dot(F_gm, x) + np.dot(G_gm, v)
+def g(F, G, x, v):
+    # TODO: generalise this to include nonlinear treatments
+    try:
+        return F @ x + G @ v
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
 
-def f_gm(x, v, A_gm, B_gm):
-    # no action in generative model, a = 0.0
-    return np.dot(A_gm, x) + np.dot(B_gm, v)
-
-def getObservation(x, v, w):
-    x[:, 1:] = f(x[:, :-1], v) + np.dot(C, w[:, None])
-    x[:, 0] += dt * x[:, 1]
-    return g(x, v)
-                
+def k_theta(D, eta_theta):                                                             # TODO: for simplicity we hereby assume that parameters are independent of other variables
+    # TODO: generalise this to include nonlinear treatments
+    try:
+        return D @ eta_theta
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
+    
+def k_gamma(E, eta_gamma):                                                             # TODO: for simplicity we hereby assume that hyperparameters are independent of other variables
+    # TODO: generalise this to include nonlinear treatments
+    try:
+        return E @ eta_gamma
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
 
 def Diff(x, dimension, embeddings, shift=1):
     D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
@@ -91,10 +99,22 @@ def FreeEnergy(y, mu_x, mu_v, mu_pi_z, mu_pi_w, A_gm, B_gm, F_gm):
                 np.sum(np.dot(np.dot((mu_x[:, 1:] - f_gm(mu_x[:, :-1], mu_v[:, :-1], A_gm, B_gm)).transpose(), mu_pi_w), (mu_x[:, 1:] - f_gm(mu_x[:, :-1], mu_v[:, :-1], A_gm, B_gm)))) - \
                 np.trace(np.log(mu_pi_z * mu_pi_w)))
 
-def F(y, x, v, theta, Pi_z, Pi_w, Pi_v, p_Pi_z, p_Pi_w):
-    return .5 * (torch.bmm(torch.bmm(torch.transpose(y - g(x, v, theta), 1, 2), Pi_z), y - g(x, theta, v)) + \
-                 torch.bmm(torch.bmm(torch.transpose(D(x, e_n) - f(x, v, theta), 1, 2), Pi_w), x[:,:,1:] - f(x, theta, v)) + \
-                 torch.bmm(torch.bmm(torch.transpose(v - h(x, theta, v), 1, 2), Pi_v), v - h(x, theta, v)) + \
-                 torch.bmm(torch.bmm(torch.transpose(Pi_z - p_1(x, theta, v), 1, 2), p_Pi_z), Pi_z - p_1(x, theta, v)) + \
-                 torch.bmm(torch.bmm(torch.transpose(Pi_w - p_2(x, theta, v), 1, 2), p_Pi_w), Pi_w - p_2(x, theta, v)) + \
-                 torch.log(torch.bmm(torch.bmm(torch.potrf(Pi_z).diag().prod(), torch.potrf(Pi_w).diag().prod()), torch.potrf(Pi_v).diag().prod())))
+# def F(y, x, v, theta, Pi_z, Pi_w, Pi_v, p_Pi_z, p_Pi_w):
+#     return .5 * (torch.bmm(torch.bmm(torch.transpose(y - g(x, v, theta), 1, 2), Pi_z), y - g(x, theta, v)) + \
+#                  torch.bmm(torch.bmm(torch.transpose(D(x, e_n) - f(x, v, theta), 1, 2), Pi_w), x[:,:,1:] - f(x, theta, v)) + \
+#                  torch.bmm(torch.bmm(torch.transpose(v - h(x, theta, v), 1, 2), Pi_v), v - h(x, theta, v)) + \
+#                  torch.bmm(torch.bmm(torch.transpose(Pi_z - p_1(x, theta, v), 1, 2), p_Pi_z), Pi_z - p_1(x, theta, v)) + \
+#                  torch.bmm(torch.bmm(torch.transpose(Pi_w - p_2(x, theta, v), 1, 2), p_Pi_w), Pi_w - p_2(x, theta, v)) + \
+#                  torch.log(torch.bmm(torch.bmm(torch.potrf(Pi_z).diag().prod(), torch.potrf(Pi_w).diag().prod()), torch.potrf(Pi_v).diag().prod())))
+
+def F(A, F, B, C, G, H, D, E, n, r, p, h, e_n, e_r, e_p, e_h, y, x, v, eta_v, theta, eta_theta, gamma, eta_gamma, Pi_z, Pi_w, Pi_v, Pi_theta, Pi_gamma):
+    eps_v = y - g(F, G, x, v)
+    eps_x = Diff(x, n, e_n+1) - f(A, B, x, v)
+    eps_eta = v - eta_v
+    eps_theta = theta - k_theta(D, eta_theta)
+    eps_gamma = gamma - k_gamma(E, eta_gamma)
+
+    return .5 * (eps_v.t() @ Pi_z @ eps_v + eps_x.t() @ Pi_w @ eps_x + eps_eta.t() @ Pi_v @ eps_eta + \
+                 eps_theta.t() @ Pi_theta @ eps_theta + eps_gamma.t() @ Pi_gamma @ eps_gamma + \
+                 (n + r + p + h) * np.log(2*np.pi) - np.log(Pi_z.det()) - np.log(Pi_w.det()) - \
+                 np.log(Pi_theta.det()) - np.log(Pi_gamma.det())).sum()     # TODO: add more terms due to the variational Gaussian approximation?
