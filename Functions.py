@@ -3,6 +3,7 @@
 import torch
 import autograd.numpy as np                 # autograd now implemented in JAX, can be replaced
 from autograd import grad                   # TODO: move this to pure pytorch
+from scipy.linalg import sqrtm, cholesky, toeplitz
 
 torch.set_default_dtype(torch.float64)
 
@@ -36,7 +37,8 @@ def dnrho(h, phi, degree):
 
 # TODO: This function is extremely slow at the moment due to the recurrent automatic 
 # differentiation of the autocorrelation function (anything around 10 takes several second)
-def smoothnessMatrix(embedding_orders, phi):
+# Check: function [R,V] = spm_DEM_R(n,s,form) and spm_DEM_z
+def temporalPrecisionMatrix(embedding_orders, phi):
     h = 0.0                                                             # lag
     derivative_order = (embedding_orders-1)*2+1
     rho_tilde = np.zeros(derivative_order,)                             # array of autocorrelations
@@ -51,11 +53,24 @@ def smoothnessMatrix(embedding_orders, phi):
 
     for i in range(embedding_orders):
         for j in range(embedding_orders):
-            S_inv[i, j] = np.power(-1, (i*j))*rho_tilde[i+j]
-    S = np.linalg.inv(S_inv)
+            S_inv[i, j] = np.power(-1, (i*j))*rho_tilde[i+j]            # roughness, this is to be multipled by the covariance matrix
 
-    return torch.from_numpy(S)
+    return torch.from_numpy(S_inv)
 
+    # S = np.linalg.inv(S_inv)                                          # smoothness, this is to be multipled by the precision matrix
+
+    # return torch.from_numpy(S)
+
+def spm_DEM_z(n, s, T, dt=1.):
+    # see also https://www.kaggle.com/charel/learn-by-example-active-inference-noise/comments
+
+    t = torch.arange(0, T, dt)                                          # autocorrelation lags
+    K = torch.from_numpy(toeplitz(torch.exp(-t**2/(2*s**2))))           # convolution matrix
+    K = torch.diag(1./torch.sqrt(torch.diag(K @ K.t()))) @ K
+    # K  = diag(1./sqrt(diag(K*K')))*K                                    # spm
+
+    noise = torch.randn(n, int(T/dt)) @ K
+    return noise
 
 def f(A, B, x, v):
     # TODO: generalise this to include nonlinear treatments
