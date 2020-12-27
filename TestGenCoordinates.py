@@ -37,7 +37,7 @@ variables = 3
 
 # test spm_DEM_z
 noise = torch.randn(1, iterations)
-smoothened_noise = spm_DEM_z(noise, 1, 5., iterations, 1)
+smoothened_noise = spm_DEM_z(1, 5., iterations, 1)
 
 P1 = toeplitz(np.exp(-np.arange(0, T, dt)**2/(2*.158**2)))
 t = np.arange(0,T,dt)
@@ -85,3 +85,30 @@ ws = np.dot(w,K)
 plt.plot(t,ws.T[:,0]) # some plot versions plot expect data in same dimension, hence the ws.T to align with w
 plt.title('$\sigma=$ ' + str(sigma))
 plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# test spm_DEM_embed
+
+dt = 0.05
+T = 5+dt
+N = int(round(T/dt))
+
+noise = torch.randn(1, N)
