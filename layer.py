@@ -3,9 +3,12 @@
 import numpy as np
 import torch
 import functions
-from scipy.linalg import sqrtm
+# from scipy.linalg import sqrtm
+
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 _large = np.exp(32.)
+_small = np.exp(-32.)
 
 # class odeSolver():
 #     def __init__(self):
@@ -19,7 +22,6 @@ class layer():
         self.T = T
         self.dt = dt
         self.iterations = int(T/dt)
-        self.history = history
         
         self.e_n = e_n                                                          # embedding dimension hidden states
         self.e_r = e_r                                                          # embedding dimension inputs
@@ -30,18 +32,18 @@ class layer():
         self.n = len(A)                                                         # hidden states dimension
         if B == 0:
             self.r = 1                                                          # inputs dimension (dynamics)
-            B = torch.zeros(1, 1)                                               # input matrix (dynamics), default
+            B = torch.zeros(1, 1, device=DEVICE)                                               # input matrix (dynamics), default
         else:
             self.r = len(B[0])                                                  # inputs dimension (dynamics)
         if G == 0:
-            G = torch.zeros(1, 1)                                               # input matrix (observations), default
+            G = torch.zeros(1, 1, device=DEVICE)                                               # input matrix (observations), default
         self.p = p                                                              # parameters dimension
         self.h = h                                                              # hyperparameters dimension
 
         if D == 0:                                                              # if there are no parameters # TODO: in general or to learn?
-            self.D = torch.tensor([[_large]])
+            self.D = torch.tensor([[_small]], device=DEVICE)
         if E == 0:                                                              # if there are no hyperparameters # TODO: in general or to learn?
-            self.E = torch.tensor([[_large]])
+            self.E = torch.tensor([[_small]], device=DEVICE)
 
         # create block matrices considering higher embedding orders
         self.A = functions.kronecker(torch.eye(self.e_n+1), A)                  # state transition matrix
@@ -51,10 +53,16 @@ class layer():
 
         # TODO: for nonlinear systems, higher embedding orders of y, x, v 
         # should contain derivatives of functions f and g
-        self.y = functions.kronecker(torch.eye(self.e_n+1), torch.zeros(self.m, 1, requires_grad = True))             # observations
-        self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))             # states
-        self.v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))             # inputs
-        self.eta_v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))         # prior on inputs
+        # self.y = functions.kronecker(torch.eye(self.e_n+1), torch.zeros(self.m, 1, requires_grad = True))             # observations
+        # self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))             # states
+        # self.v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))             # inputs
+        # self.eta_v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))         # prior on inputs
+
+
+        self.y = torch.zeros(self.iterations, self.e_n+1*self.m, self.e_n+1*self.m, requires_grad = True, device = DEVICE)             # observations
+        self.x = torch.zeros(self.iterations, self.e_n+1*self.n, self.e_n+1*self.n, requires_grad = True, device = DEVICE)             # states
+        self.v = torch.zeros(self.iterations, self.e_r+1*self.r, self.e_r+1*self.r, requires_grad = True, device = DEVICE)             # inputs
+        self.eta_v = torch.zeros(self.iterations, self.e_r+1*self.r, self.e_r+1*self.r, requires_grad = True, device = DEVICE)         # prior on inputs
         
         ## parameters and hyperparameters ##
         if p == 0:                                                                  # if there are no parameters # TODO: in general or to learn?
@@ -80,11 +88,11 @@ class layer():
         self.phi = phi                                                                  # smoothness of temporal correlations
 
         if len(Sigma_z) > 0:                                                            # if the model includes system noise
-            self.H = torch.from_numpy(sqrtm(Sigma_z))
-            self.z = H @ functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
-            # self.S_inv_z = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix observation noise, roughness
-            # self.Sigma_z = functions.kronecker(self.S_inv_z, Sigma_z)                   # precision matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
-            # self.Pi_z = self.Sigma_z.pinverse()                                         # covariance matrix observation noise including higher embedding orders
+            self.H = functions.symsqrt(Sigma_z)
+            self.z = functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
+            self.S_inv_z = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix observation noise, roughness
+            self.Sigma_z = functions.kronecker(self.S_inv_z, Sigma_z)                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
+            self.Pi_z = self.Sigma_z.pinverse()                                         # precision matrix observation noise including higher embedding orders
             # self.H = torch.sqrt(self.Sigma_z)                                           # observation noise matrix, # FIXME: assuming independent noise across dimensions
             # self.z = functions.kronecker(torch.eye(self.e_n+1), torch.randn(self.m, 1)) # observation noise, as derivative of Wiener process
         else:
@@ -94,11 +102,11 @@ class layer():
             self.z = torch.zeros(1)
 
         if len(Sigma_w) > 0:                                                            # if the model includes measurement noise
-            self.C = torch.from_numpy(sqrtm(Sigma_w))
-            self.w = H @ functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
-            # self.S_inv_w = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix system noise, roughness
-            # self.Sigma_w = functions.kronecker(self.S_inv_w, Sigma_w)                   # precision matrix system noise including higher embedding orders
-            # self.Pi_w = self.Sigma_w.pinverse()                                         # covariance matrix system noise including higher embedding orders
+            self.C = functions.symsqrt(Sigma_w)
+            self.w = functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
+            self.S_inv_w = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix system noise, roughness
+            self.Sigma_w = functions.kronecker(self.S_inv_w, Sigma_w)                   # covariance matrix system noise including higher embedding orders
+            self.Pi_w = self.Sigma_w.pinverse()                                         # precision matrix system noise including higher embedding orders
             # self.C = torch.sqrt(self.Sigma_w)                                           # system noise matrix, # FIXME: assuming independent noise across dimensions, we need something like sqrtm for matlab
             # self.w = functions.kronecker(torch.eye(self.e_n+1), torch.randn(self.n, 1)) # system noise, as derivative of Wiener process
         else:
@@ -117,19 +125,21 @@ class layer():
 
         ## history ##
         # TODO: this should be used with parsimony to avoid the RAM blowing up for big models
-        self.y_history = torch.zeros(self.history, *self.y.shape)
-        self.x_history = torch.zeros(self.history, *self.x.shape)
-        self.v_history = torch.zeros(self.history, *self.v.shape)
-        self.eta_v_history = torch.zeros(self.history, *self.eta_v.shape)
+        self.y_history = torch.zeros(self.iterations, *self.y.shape)
+        self.x_history = torch.zeros(self.iterations, *self.x.shape)
+        self.v_history = torch.zeros(self.iterations, *self.v.shape)
+        self.eta_v_history = torch.zeros(self.iterations, *self.eta_v.shape)
 
-        self.w_history = torch.zeros(self.history, *self.w.shape)
-        self.z_history = torch.zeros(self.history, *self.z.shape)
+        self.w_history = torch.zeros(self.iterations, *self.w.shape)
+        self.z_history = torch.zeros(self.iterations, *self.z.shape)
+
+        self.F_history = torch.zeros(self.iterations, 1)
     
-    def f(self):
-        return functions.f(self.A, self.B, self.x, self.v)
+    def f(self, i):
+        return functions.f(self.A, self.B, self.x[i,:,:], self.v[i,:,:])
 
-    def g(self):
-        return functions.g(self.F, self.G, self.x, self.v)
+    def g(self, i):
+        return functions.g(self.F, self.G, self.x[i,:,:], self.v[i,:,:])
 
     def k_theta(self):                                                             # TODO: for simplicity we hereby assume that parameters are independent of other variables
         return functions.k_theta(self.D, self.eta_theta)
@@ -143,22 +153,22 @@ class layer():
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
 
-    def free_energy(self): 
-        return functions.F(self.A, self.F, self.B, self.C, self.G, self.H, self.D, self.E, self.n, self.r, self.p, self.h, self.e_n, self.e_r, self.e_p, self.e_h, self.y, self.x, self.v, self.eta_v, self.theta, self.eta_theta, self.gamma, self.eta_gamma, self.Pi_z, self.Pi_w, self.Pi_v, self.Pi_theta, self.Pi_gamma)
+    def free_energy(self, i): 
+        self.F_history[i] = functions.F(self.A, self.F, self.B, self.C, self.G, self.H, self.D, self.E, self.n, self.r, self.p, self.h, self.e_n, self.e_r, self.e_p, self.e_h, self.y, self.x, self.v, self.eta_v, self.theta, self.eta_theta, self.gamma, self.eta_gamma, self.Pi_z, self.Pi_w, self.Pi_v, self.Pi_theta, self.Pi_gamma)
+        return self.F_history[i]
 
-    def step(self, dt):
+    def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
         self.dw = functions.Diff(self.w, self.n, self.e_n+1)
         self.dz = functions.Diff(self.z, self.m, self.e_n+1)
-        self.dx = self.f() + self.C @ self.w
+        self.dx = self.f(i) + self.C @ self.w[:,i,None]
 
-        self.w += dt * self.dw
-        self.z += dt * self.dz
-        self.x += dt * self.dx
+        self.w[i+1,:,:] = self.w[i,:,:] + self.dt * self.dw
+        self.z[i+1,:,:] = self.z[i,:,:] + self.dt * self.dz
+        self.x[i+1,:,:] = self.x[i,:,:] + self.dt * self.dx
 
-        print(self.w, self.dw)
+        self.y[i+1,:,:] = self.g(i) + self.H @ self.z[:,i,None]
 
-        self.y = self.g() + self.H @ self.z
 
         # for i in range(1, self.n):
         #     self.y[i*self.n:i*self.n+self.n, i*self.n:i*self.n+self.n]
