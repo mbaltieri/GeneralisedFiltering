@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 
 # torch.autograd.set_detect_anomaly(True)
 
-dt = .01
-T = 10
+dt = .05
+T = 50
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -24,23 +24,27 @@ e_h = 0                             # embedding dimension hyperparameters
 delta = -1.50                                                # parameters simulating a simple mass-spring system as the environment
 epsilon = -10.0
 
-A = torch.tensor([[0, 1], [delta, epsilon]])
-F = torch.tensor([[1, 0], [1, 0], [1, 0], [1, 0]])
+A = torch.tensor([[0, 1], [delta, epsilon]], device=DEVICE)
+F = torch.tensor([[1, 0], [1, 0], [1, 0], [1, 0]], device=DEVICE)
 
-Sigma_w = torch.tensor([[0., 0.], [0., .1]])
-Sigma_z = torch.tensor([[2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0, .5, 0.], [0., 0., 0., .25]])                       # TODO: tensor type deault is 'int64' but need float for pseudo-inverse
+Sigma_w = torch.tensor([[0., 0.], [0., .1]], device=DEVICE)
+Sigma_z = torch.tensor([[2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0, .5, 0.], [0., 0., 0., .25]], device=DEVICE)                       # TODO: tensor type deault is 'int64' but need float for pseudo-inverse
+
+Sigma_w_GM = torch.tensor([[.1, 0.], [0., .1]], device=DEVICE)
 
 GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=0, history=iterations)            # TODO: At the moment simulating only sequencies with Brownian motion, 
                                                                             # since Gaussian autocorrelations introduce negative covariances that 
-                                                                            # can't truly be simulated (as fai as I know), Karl has a way to build 
+                                                                            # can't truly be simulated (as far as I know), Karl has a way to build 
                                                                             # generalised sequencies out of this so check spm
-GM = layer(A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=0, history=iterations)
+GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=0, history=iterations)
 
 for i in range(iterations):
-    GP.step(dt)
-    # GM.setObservations(GP.y.detach())
+    print(i)
 
-    # F = GM.free_energy()
+    GP.step(i)
+    GM.setObservations(GP.y.detach())
+
+    F = GM.free_energy(i)
     
     # retain gradients for intermediate variables
     # TODO: find a better way to deal with this
@@ -49,6 +53,7 @@ for i in range(iterations):
 
 
     # F.backward(retain_graph=True)                             # TODO: is retain_graph=True necessary? Or even correct?
+    F.backward()
 
     # dFdx = GM.x.grad
     # dFdv = GM.v.grad
@@ -61,6 +66,8 @@ for i in range(iterations):
     GP.save_history(i)
 
     
+print(GM.F_history)
+
 fig = plt.figure()
 ax1 = fig.add_subplot(121)
 ax2 = fig.add_subplot(122)
