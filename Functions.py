@@ -113,8 +113,8 @@ def spm_DEM_embed(Y,n,t,dt=1,d=0):
     # loop over channels
     
     # boundary conditions
-    s      = (t - d)/dt
-    k      = range(1,n) + torch.fix(s - (n + 1)/2)
+    s      = torch.tensor([(t + 1 - d)/dt])
+    k      = torch.arange(1,n+1) + torch.trunc(s - (n + 1)/2).long()
     x      = s - min(k) + 1
     i      = k < 1
     k      = k * ~i + i
@@ -124,16 +124,17 @@ def spm_DEM_embed(Y,n,t,dt=1,d=0):
 
     # Inverse embedding operator (T): cf, Taylor expansion Y(t) <- T*y[:]
     T = torch.zeros(n,n)
-    for i in range(1,n):
-        for j in range(1,n):
-            T[i,j] = ((i - x) * dt)**(j - 1)/math.factorial((j - 1))
+    for i in range(0,n):
+        for j in range(0,n):
+            T[i,j] = ((i + 1 - x) * dt)**j/math.factorial(j)
 
     # embedding operator: y[:] <- E*Y(t)
     E     = torch.inverse(T)
 
+    y = torch.zeros(q, n)
     # embed
-    for i in range(1,n):
-        y      = Y[:,k] * E[i,:].t()
+    for i in range(0,n):
+        y[:,i]      = Y[:,k-1] @ E[i,:].t()
     return y
 
 
@@ -217,6 +218,6 @@ def F(A, F, B, C, G, H, D, E, n, r, p, h, e_n, e_r, e_p, e_h, y, x, v, eta_v, th
 
 
     return .5 * (eps_v.t() @ Pi_z @ eps_v + eps_x.t() @ Pi_w @ eps_x + eps_eta.t() @ Pi_v @ eps_eta + \
-                 eps_theta.t() @ Pi_theta @ eps_theta + eps_gamma.t() @ Pi_gamma @ eps_gamma + \
-                 (n + r + p + h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(Pi_z) - torch.logdet(Pi_w))# - \
-                #  torch.logdet(Pi_theta) - torch.logdet(Pi_gamma)).sum()     # TODO: add more terms due to the variational Gaussian approximation?
+                eps_theta.t() @ Pi_theta @ eps_theta + eps_gamma.t() @ Pi_gamma @ eps_gamma + \
+                (n + r + p + h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(Pi_z) - torch.logdet(Pi_w) - \
+                torch.logdet(Pi_theta) - torch.logdet(Pi_gamma)).sum()     # TODO: add more terms due to the variational Gaussian approximation?
