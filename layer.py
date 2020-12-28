@@ -1,14 +1,16 @@
 # This module containes the definition of a single layer of a generic probabilistc model
 
-import numpy as np
+import math
+
+# import numpy as np
 import torch
 import functions
 # from scipy.linalg import sqrtm
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-_large = np.exp(32.)
-_small = np.exp(-32.)
+_large = torch.exp(torch.tensor(32.))
+_small = torch.exp(torch.tensor(-32.))
 
 # class odeSolver():
 #     def __init__(self):
@@ -22,6 +24,8 @@ class layer():
         self.T = T
         self.dt = dt
         self.iterations = int(T/dt)
+
+        self.F1 = F
         
         self.e_n = e_n                                                          # embedding dimension hidden states
         self.e_r = e_r                                                          # embedding dimension inputs
@@ -59,10 +63,10 @@ class layer():
         # self.eta_v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))         # prior on inputs
 
 
-        self.y = torch.zeros(self.iterations, self.e_n+1*self.m, self.e_n+1*self.m, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.zeros(self.iterations, self.e_n+1*self.n, self.e_n+1*self.n, requires_grad = True, device = DEVICE)             # states
-        self.v = torch.zeros(self.iterations, self.e_r+1*self.r, self.e_r+1*self.r, requires_grad = True, device = DEVICE)             # inputs
-        self.eta_v = torch.zeros(self.iterations, self.e_r+1*self.r, self.e_r+1*self.r, requires_grad = True, device = DEVICE)         # prior on inputs
+        self.y = torch.zeros(self.m, self.e_n+1, requires_grad = True, device = DEVICE)             # observations
+        self.x = torch.zeros(self.n, self.e_n+1, requires_grad = True, device = DEVICE)             # states
+        self.v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)             # inputs
+        self.eta_v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)         # prior on inputs
         
         ## parameters and hyperparameters ##
         if p == 0:                                                                  # if there are no parameters # TODO: in general or to learn?
@@ -89,7 +93,7 @@ class layer():
 
         if len(Sigma_z) > 0:                                                            # if the model includes system noise
             self.H = functions.symsqrt(Sigma_z)
-            self.z = functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
+            self.zSmoothened = functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
             self.S_inv_z = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix observation noise, roughness
             self.Sigma_z = functions.kronecker(self.S_inv_z, Sigma_z)                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
             self.Pi_z = self.Sigma_z.pinverse()                                         # precision matrix observation noise including higher embedding orders
@@ -103,7 +107,7 @@ class layer():
 
         if len(Sigma_w) > 0:                                                            # if the model includes measurement noise
             self.C = functions.symsqrt(Sigma_w)
-            self.w = functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
+            self.wSmoothened = functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
             self.S_inv_w = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix system noise, roughness
             self.Sigma_w = functions.kronecker(self.S_inv_w, Sigma_w)                   # covariance matrix system noise including higher embedding orders
             self.Pi_w = self.Sigma_w.pinverse()                                         # precision matrix system noise including higher embedding orders
@@ -117,7 +121,7 @@ class layer():
         
         if len(Sigma_v) > 0:                                                            # if the model includes uncertainty on inputs
             self.S_v = functions.smoothnessMatrix(self.e_r+1, self.phi)                 # temporal precision matrix system noise
-            self.Pi_v = torch.from_numpy(np.kron(self.S_v, Sigma_v))                    # precision matrix system noise including higher embedding orders
+            self.Pi_v = functions.kronecker(self.S_v, Sigma_v)                    # precision matrix system noise including higher embedding orders
             self.Sigma_v = self.Pi_v.pinverse()                                         # covariance matrix system noise including higher embedding orders
         else:
             self.Sigma_v = torch.tensor([[_large]])
@@ -130,16 +134,17 @@ class layer():
         self.v_history = torch.zeros(self.iterations, *self.v.shape)
         self.eta_v_history = torch.zeros(self.iterations, *self.eta_v.shape)
 
-        self.w_history = torch.zeros(self.iterations, *self.w.shape)
-        self.z_history = torch.zeros(self.iterations, *self.z.shape)
+        self.w_history = torch.zeros(self.iterations, self.n, self.e_n+1)
+        self.z_history = torch.zeros(self.iterations, self.m, self.e_n+1)
 
         self.F_history = torch.zeros(self.iterations, 1)
+
     
     def f(self, i):
-        return functions.f(self.A, self.B, self.x[i,:,:], self.v[i,:,:])
+        return functions.f(self.A, self.B, self.x, self.v)
 
     def g(self, i):
-        return functions.g(self.F, self.G, self.x[i,:,:], self.v[i,:,:])
+        return functions.g(self.F, self.G, self.x, self.v)
 
     def k_theta(self):                                                             # TODO: for simplicity we hereby assume that parameters are independent of other variables
         return functions.k_theta(self.D, self.eta_theta)
@@ -147,27 +152,48 @@ class layer():
     def k_gamma(self):                                                             # TODO: for simplicity we hereby assume that hyperparameters are independent of other variables
         return functions.k_theta(self.E, self.eta_gamma)
 
-    def prediction_errors(self):
-        self.eps_v = self.y - self.g()
-        self.eps_x = functions.Diff(self.x, self.n, self.e_n+1) - self.f()
+    def prediction_errors(self, i):
+        self.eps_v = self.y - self.g(i)
+        self.eps_x = functions.Diff(self.x, self.n, self.e_n+1) - self.f(i)
+        self.eps_eta = self.v - self.eta_v
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
 
     def free_energy(self, i): 
-        self.F_history[i] = functions.F(self.A, self.F, self.B, self.C, self.G, self.H, self.D, self.E, self.n, self.r, self.p, self.h, self.e_n, self.e_r, self.e_p, self.e_h, self.y, self.x, self.v, self.eta_v, self.theta, self.eta_theta, self.gamma, self.eta_gamma, self.Pi_z, self.Pi_w, self.Pi_v, self.Pi_theta, self.Pi_gamma)
-        return self.F_history[i]
+        # self.F_history[i] = functions.F(self.A, self.F, self.B, self.C, self.G, self.H, self.D, self.E, self.n, self.r, self.p, self.h, self.e_n, self.e_r, self.e_p, self.e_h, self.y, self.x, self.v, self.eta_v, self.theta, self.eta_theta, self.gamma, self.eta_gamma, self.Pi_z, self.Pi_w, self.Pi_v, self.Pi_theta, self.Pi_gamma)
+        self.prediction_errors(i)
+
+        self.F_history[i] = .5 * (self.eps_v.t() @ self.Pi_z @ self.eps_v + self.eps_x.t() @ self.Pi_w @ self.eps_x + self.eps_eta.t() @ self.Pi_v @ self.eps_eta + \
+                            self.eps_theta.t() @ self.Pi_theta @ self.eps_theta + self.eps_gamma.t() @ self.Pi_gamma @ self.eps_gamma + \
+                            (self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum()     # TODO: add more terms due to the variational Gaussian approximation?
+
+        return .5 * (self.eps_v.t() @ self.Pi_z @ self.eps_v + self.eps_x.t() @ self.Pi_w @ self.eps_x + self.eps_eta.t() @ self.Pi_v @ self.eps_eta + \
+                    self.eps_theta.t() @ self.Pi_theta @ self.eps_theta + self.eps_gamma.t() @ self.Pi_gamma @ self.eps_gamma + \
+                    (self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+                    torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum()
 
     def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
-        self.dw = functions.Diff(self.w, self.n, self.e_n+1)
-        self.dz = functions.Diff(self.z, self.m, self.e_n+1)
-        self.dx = self.f(i) + self.C @ self.w[:,i,None]
 
-        self.w[i+1,:,:] = self.w[i,:,:] + self.dt * self.dw
-        self.z[i+1,:,:] = self.z[i,:,:] + self.dt * self.dz
-        self.x[i+1,:,:] = self.x[i,:,:] + self.dt * self.dx
+        # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
+        # self.dw = functions.Diff(self.w, self.n, self.e_n+1)
+        # self.dz = functions.Diff(self.z, self.m, self.e_n+1)
 
-        self.y[i+1,:,:] = self.g(i) + self.H @ self.z[:,i,None]
+        self.w = functions.spm_DEM_embed(self.wSmoothened, self.e_n+1, i, dt=self.dt)
+        self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=self.dt)
+
+        # self.dx = self.f(i) + self.C @ self.w[:,i,None]
+        self.dx = self.f(i) + self.C @ self.w
+
+        # self.w[i+1,:,:] = self.w[i,:,:] + self.dt * self.dw
+        # self.z[i+1,:,:] = self.z[i,:,:] + self.dt * self.dz
+        self.x = self.x + self.dt * self.dx
+
+        # self.y[i+1,:,:] = self.g(i) + self.H @ self.z[:,i,None]
+        self.y = self.g(i) + self.H @ self.z
+
+        self.save_history(i)
 
 
         # for i in range(1, self.n):
@@ -175,7 +201,6 @@ class layer():
 
 
         ### from spm_ADEM_diff
-
         # u.v{1}  = spm_vec(vi);
         # u.x{2}  = spm_vec(fi) + u.w{1};
         # for i = 2:(n - 1)
@@ -195,7 +220,7 @@ class layer():
         # 1: Euler-Maruyama
     
     def setObservations(self, y):
-        self.y = y
+        self.y = y.detach()
 
     def save_history(self, i):
         self.y_history[i, :, :] = self.y
