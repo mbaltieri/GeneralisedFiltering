@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 # torch.autograd.set_detect_anomaly(True)
 
 dt = .05
-T = 50
+T = 15
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -16,7 +16,7 @@ r = 2                               # inputs dimension
 p = 6                               # parameters dimension
 h = 3                               # hyperparameters dimension
 
-e_n = 3                             # embedding dimension hidden states
+e_n = 0                             # embedding dimension hidden states
 e_r = 0                             # embedding dimension inputs
 e_p = 0                             # embedding dimension parameters
 e_h = 0                             # embedding dimension hyperparameters
@@ -32,18 +32,20 @@ Sigma_z = torch.tensor([[2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0, .5, 0.], [0.
 
 Sigma_w_GM = torch.tensor([[.1, 0.], [0., .1]], device=DEVICE)
 
-GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=0, history=iterations)            # TODO: At the moment simulating only sequencies with Brownian motion, 
+GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, history=iterations)            # TODO: At the moment simulating only sequencies with Brownian motion, 
                                                                             # since Gaussian autocorrelations introduce negative covariances that 
                                                                             # can't truly be simulated (as far as I know), Karl has a way to build 
                                                                             # generalised sequencies out of this so check spm
-GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=0, history=iterations)
+GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n, history=iterations)
 
-for i in range(iterations):
+for i in range(iterations-1):
     print(i)
 
     GP.step(i)
-    GM.setObservations(GP.y.detach())
+    # GM.setObservations(GP.y.detach())
+    GM.setObservations(GP.y)
 
+    # GM.generalisedCoordinates()
     F = GM.free_energy(i)
     
     # retain gradients for intermediate variables
@@ -63,19 +65,17 @@ for i in range(iterations):
     # GM.v += dt * dFdv
     
     # GM.save_history(i)
-    GP.save_history(i)
+    # GP.save_history(i)
 
-    
-print(GM.F_history)
 
 fig = plt.figure()
 ax1 = fig.add_subplot(121)
 ax2 = fig.add_subplot(122)
 
-ax1.plot(range(iterations), GP.x_history[:,0,0].detach(), 'b')
-# ax1.plot(range(iterations), GM.x_history[:,0,0].detach(), 'r')
+ax1.plot(range(iterations-1), GP.y_history[:-1,0,0].detach(), 'b')
+ax1.plot(range(iterations-1), GM.x_history[:-1,0,0].detach(), 'r')
 
-ax2.plot(range(iterations), GP.w_history[:,0,0].detach(), 'b')
-ax2.plot(range(iterations), GP.w_history[:,1,0].detach(), 'r')
+ax2.plot(range(iterations-1), GP.w_history[:-1,0,0].detach(), 'b')
+ax2.plot(range(iterations-1), GP.w_history[:-1,1,0].detach(), 'r')
 
 plt.show()
