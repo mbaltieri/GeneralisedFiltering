@@ -2,8 +2,8 @@ from functions import *
 import torch
 import matplotlib.pyplot as plt
 
-T = 1
-dt = .01
+T = 100
+dt = 1
 iterations = int(T/dt)
 
 embedding_orders = 3
@@ -35,6 +35,17 @@ variables = 3
 # a = 1
 
 
+
+
+
+
+
+
+
+
+
+
+
 # test spm_DEM_z
 noise = torch.randn(1, iterations)
 smoothened_noise = spm_DEM_z(1, 5., iterations, 1)
@@ -54,8 +65,6 @@ plt.plot(range(iterations), noise[0, :])
 plt.plot(range(iterations), smoothened_noise[0, :])
 plt.plot(range(iterations), smoothened_noise2[0, :])
 
-plt.show()
-
 
 # np.random.seed(3)
 # Setting up the time data:
@@ -74,6 +83,7 @@ w = np.dot(L,np.random.randn(n,N))
 w = np.random.randn(n,N)
 w = noise.numpy()
 # Plot the first white noise sequence:
+plt.figure()
 plt.plot(t,w.T[:,0],label='test')
 # Set up convolution matrix:
 sigma = 0.158
@@ -101,14 +111,22 @@ plt.show()
 
 
 
-
-
+N = 2               # number of dimensions
+genCoord = 4        # number of embedding orders
+phi = 2.
 
 
 # test spm_DEM_embed
 
-dt = 0.05
-T = 5+dt
-N = int(round(T/dt))
+dt = .5
+T = 5
+iterations = int(round(T/dt))
 
-noise = torch.randn(1, N)
+noiseNEW = spm_DEM_z(N, phi, T, dt)
+
+noiseGENCOORD = torch.zeros(iterations, N, genCoord)
+
+for i in range(iterations):
+    noiseGENCOORD[i,:,:] = spm_DEM_embed(noiseNEW, genCoord, dt)
+
+print(noiseGENCOORD)
