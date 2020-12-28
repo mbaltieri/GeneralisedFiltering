@@ -58,13 +58,13 @@ class layer():
         # TODO: for nonlinear systems, higher embedding orders of y, x, v 
         # should contain derivatives of functions f and g
         # self.y = functions.kronecker(torch.eye(self.e_n+1), torch.zeros(self.m, 1, requires_grad = True))             # observations
-        # self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))             # states
+        self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))             # states
         # self.v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))             # inputs
         # self.eta_v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))         # prior on inputs
 
 
         self.y = torch.zeros(self.m, self.e_n+1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.zeros(self.n, self.e_n+1, requires_grad = True, device = DEVICE)             # states
+        # self.x = torch.zeros(self.n, self.e_n+1, requires_grad = True, device = DEVICE)             # states
         self.v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)             # inputs
         self.eta_v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)         # prior on inputs
         
@@ -92,11 +92,12 @@ class layer():
         self.phi = phi                                                                  # smoothness of temporal correlations
 
         if len(Sigma_z) > 0:                                                            # if the model includes system noise
-            self.H = functions.symsqrt(Sigma_z)
+            # self.H = functions.symsqrt(Sigma_z)
             self.zSmoothened = functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
             self.S_inv_z = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix observation noise, roughness
             self.Sigma_z = functions.kronecker(self.S_inv_z, Sigma_z)                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
             self.Pi_z = self.Sigma_z.pinverse()                                         # precision matrix observation noise including higher embedding orders
+            self.H = functions.symsqrt(self.Sigma_z)
             # self.H = torch.sqrt(self.Sigma_z)                                           # observation noise matrix, # FIXME: assuming independent noise across dimensions
             # self.z = functions.kronecker(torch.eye(self.e_n+1), torch.randn(self.m, 1)) # observation noise, as derivative of Wiener process
         else:
@@ -106,11 +107,12 @@ class layer():
             self.z = torch.zeros(1)
 
         if len(Sigma_w) > 0:                                                            # if the model includes measurement noise
-            self.C = functions.symsqrt(Sigma_w)
+            # self.C = functions.symsqrt(Sigma_w)
             self.wSmoothened = functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
             self.S_inv_w = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix system noise, roughness
             self.Sigma_w = functions.kronecker(self.S_inv_w, Sigma_w)                   # covariance matrix system noise including higher embedding orders
             self.Pi_w = self.Sigma_w.pinverse()                                         # precision matrix system noise including higher embedding orders
+            self.C = functions.symsqrt(self.Sigma_w)
             # self.C = torch.sqrt(self.Sigma_w)                                           # system noise matrix, # FIXME: assuming independent noise across dimensions, we need something like sqrtm for matlab
             # self.w = functions.kronecker(torch.eye(self.e_n+1), torch.randn(self.n, 1)) # system noise, as derivative of Wiener process
         else:
@@ -184,6 +186,10 @@ class layer():
         self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=self.dt)
 
         # self.dx = self.f(i) + self.C @ self.w[:,i,None]
+        print(self.w)
+        print(self.x)
+        aa = self.f(i)
+        aaa = self.C @ self.w
         self.dx = self.f(i) + self.C @ self.w
 
         # self.w[i+1,:,:] = self.w[i,:,:] + self.dt * self.dw

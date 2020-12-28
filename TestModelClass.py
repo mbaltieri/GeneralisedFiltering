@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 
 # torch.autograd.set_detect_anomaly(True)
 
-dt = .05
-T = 15
+dt = .5
+T = 3
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -16,7 +16,7 @@ r = 2                               # inputs dimension
 p = 6                               # parameters dimension
 h = 3                               # hyperparameters dimension
 
-e_n = 0                             # embedding dimension hidden states
+e_n = 1                             # embedding dimension hidden states
 e_r = 0                             # embedding dimension inputs
 e_p = 0                             # embedding dimension parameters
 e_h = 0                             # embedding dimension hyperparameters
@@ -69,13 +69,29 @@ for i in range(iterations-1):
 
 
 fig = plt.figure()
-ax1 = fig.add_subplot(121)
-ax2 = fig.add_subplot(122)
+ax1 = fig.add_subplot(151)
+ax2 = fig.add_subplot(152)
+ax3 = fig.add_subplot(153)
+ax4 = fig.add_subplot(154)
+ax5 = fig.add_subplot(155)
 
 ax1.plot(range(iterations-1), GP.y_history[:-1,0,0].detach(), 'b')
 ax1.plot(range(iterations-1), GM.x_history[:-1,0,0].detach(), 'r')
 
 ax2.plot(range(iterations-1), GP.w_history[:-1,0,0].detach(), 'b')
 ax2.plot(range(iterations-1), GP.w_history[:-1,1,0].detach(), 'r')
+
+ax3.plot(range(iterations-1), GP.wSmoothened[0,:-1].detach(), 'b')
+ax3.plot(range(iterations-1), GP.wSmoothened[1,:-1].detach(), 'r')
+
+ax4.plot(range(iterations-1), GP.z_history[:-1,0,0].detach(), 'b')
+ax4.plot(range(iterations-1), GP.z_history[:-1,1,0].detach(), 'r')
+ax4.plot(range(iterations-1), GP.z_history[:-1,2,0].detach(), 'g')
+ax4.plot(range(iterations-1), GP.z_history[:-1,3,0].detach(), 'k')
+
+ax5.plot(range(iterations-1), GP.zSmoothened[0,:-1].detach(), 'b')
+ax5.plot(range(iterations-1), GP.zSmoothened[1,:-1].detach(), 'r')
+ax5.plot(range(iterations-1), GP.zSmoothened[2,:-1].detach(), 'g')
+ax5.plot(range(iterations-1), GP.zSmoothened[3,:-1].detach(), 'k')
 
 plt.show()
