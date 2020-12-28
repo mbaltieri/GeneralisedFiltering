@@ -42,7 +42,7 @@ def dsigmoid(x):
 
 # autocorrelation function (Gaussian)
 def rho(h, phi):
-    return torch.exp(-.5*h**2/phi)
+    return np.exp(-.5*h**2/phi)
 
 # n-th derivative of rho function
 def findDerivatives(orders):                   
@@ -59,7 +59,7 @@ def dnrho(h, phi, degree):
 # differentiation of the autocorrelation function (anything around 10 takes several second)
 # Check: function [R,V] = spm_DEM_R(n,s,form) and spm_DEM_z
 def temporalPrecisionMatrix(embedding_orders, phi):
-    h = torch.tensor([[0.0]])                                           # lag
+    h = 0.0                                           # lag
     derivative_order = (embedding_orders-1)*2+1
     rho_tilde = torch.zeros(derivative_order,)                          # array of autocorrelations
     S_inv = torch.zeros((embedding_orders,embedding_orders))            # temporal roughness
