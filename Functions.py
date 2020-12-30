@@ -63,7 +63,7 @@ def temporalPrecisionMatrix(embedding_orders, phi):
     derivative_order = (embedding_orders-1)*2+1
     rho_tilde = torch.zeros(derivative_order,)                          # array of autocorrelations
     S_inv = torch.zeros((embedding_orders,embedding_orders))            # temporal roughness
-    S = torch.zeros((embedding_orders,embedding_orders))                # temporal smoothness
+    # S = torch.zeros((embedding_orders,embedding_orders))                # temporal smoothness
 
     drho = findDerivatives(derivative_order)
     rho_tilde[0] = rho(h, phi)
@@ -80,6 +80,87 @@ def temporalPrecisionMatrix(embedding_orders, phi):
     # S = np.linalg.inv(S_inv)                                          # smoothness, this is to be multipled by the precision matrix
 
     # return torch.from_numpy(S)
+
+
+def spm_DEM_R(n, s):
+    # function adapted and simplied from SPM, original description below; this is now in use as it is much faster for higher numbers of generalised coordinates
+
+    # function [R,V] = spm_DEM_R(n,s,form)
+    # returns the precision of the temporal derivatives of a Gaussian process
+    # FORMAT [R,V] = spm_DEM_R(n,s,form)
+    #__________________________________________________________________________
+    # n    - truncation order
+    # s    - temporal smoothness - s.d. of kernel {bins}
+    # form - 'Gaussian', '1/f' [default: 'Gaussian']
+    #
+    #                         e[:] <- E*e(0)
+    #                         e(0) -> D*e[:]
+    #                 <e[:]*e[:]'> = R
+    #                              = <E*e(0)*e(0)'*E'>
+    #                              = E*V*E'
+    #
+    # R    - (n x n)     E*V*E: precision of n derivatives
+    # V    - (n x n)     V:    covariance of n derivatives
+    #__________________________________________________________________________
+    # Copyright (C) 2008 Wellcome Trust Centre for Neuroimaging
+
+    # Karl Friston
+    # $Id: spm_DEM_R.m 4278 2011-03-31 11:48:00Z karl $
+
+    # if no serial dependencies 
+    #--------------------------------------------------------------------------
+    if n == 0:
+        R = torch.zeros(0,0)
+        return R
+    if s == 0:
+        s = torch.exp(torch.tensor([-8]))
+
+
+
+    # temporal correlations (assuming known form) - V
+    #--------------------------------------------------------------------------
+    # try, form; catch, form = 'Gaussian'; end
+
+    # switch form
+
+    #     case{'Gaussian'} # curvature: D^k(r) = cumprod(1 - k)/(sqrt(2)*s)^k
+    #------------------------------------------------------------------
+    k = torch.arange(0,n)
+    x = torch.sqrt(torch.tensor([2.])) * s
+    r = torch.zeros(2*n-1)
+    r[2*k] = torch.cumprod((1 - 2*k), dim=0)/(x**(2*k))
+
+    #     case{'1/f'}     # g(w) = exp(-x*w) => r(t) = sqrt(2/pi)*x/(x^2 + w^2)
+    #         #------------------------------------------------------------------
+    #         k          = [0:(n - 1)];
+    #         x          = 8*s^2;
+    #         r(1 + 2*k) = (-1).^k.*gamma(2*k + 1)./(x.^(2*k));
+            
+    #     otherwise
+    #         errordlg('unknown autocorrelation')
+    # end
+
+
+    # create covariance matrix in generalised coordinates
+    #==========================================================================
+    V = torch.zeros(n, n)
+    for i in range(n):
+        V[i,:] = r[torch.arange(0,n) + i]
+        r = -r
+
+    # and precision - R
+    #--------------------------------------------------------------------------
+    R = V.inverse()
+
+    return V
+
+
+
+
+
+
+
+
 
 def spm_DEM_embed(Y,n,t,dt=1,d=0):
     # function adapted and simplied from SPM, original description below
@@ -106,8 +187,8 @@ def spm_DEM_embed(Y,n,t,dt=1,d=0):
     # y      = cell(n,1);
     # [y{:}] = deal(sparse(q,1));
 
-    # % return if ~q
-    # %--------------------------------------------------------------------------
+    # # return if ~q
+    # #--------------------------------------------------------------------------
     # if ~q, return, end
 
     # loop over channels
@@ -161,10 +242,13 @@ def spm_DEM_z(n, s, T, dt=1.):
     noise = torch.randn(n, int(T/dt)) @ K
     return noise
 
-def f(A, B, x, v):
+def f(A, B_d, B_a, x, d, a):
     # TODO: generalise this to include nonlinear treatments
+    ab = A @ x
+    abb = B_d @ d
+    abbb = B_a @ a
     try:
-        return A @ x + B @ v
+        return A @ x + B_d @ d + B_a @ a
     except RuntimeError:
         print("Dimensions don't match!")
         return
@@ -199,8 +283,6 @@ def Diff(x, dimension, embeddings, shift=1):
     D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])    # TODO: find better workaround
     return D @ x
 
-def generalised(A, dimension, embeddings):
-    kronecker
     
 
 # def FreeEnergy(y, mu_x, mu_v, mu_pi_z, mu_pi_w, A_gm, B_gm, F_gm):
