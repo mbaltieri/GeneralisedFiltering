@@ -134,8 +134,18 @@ def spm_DEM_embed(Y,n,t,dt=1,d=0):
     y = torch.zeros(q, n)
     # embed
     for i in range(0,n):
-        y[:,i]      = Y[:,k-1] @ E[i,:].t()
-    return y
+        y[:,i] = Y[:,k-1] @ E[i,:].t()         # TODO: Use torch.block_diag, i.e., noise = [[noise, zeros], [zeros, noise1gencoord]] ... or not? Everything in one column?
+    
+    z = y.t().flatten().t().unsqueeze(1)        # TODO: Look for more elegant solution
+
+    # likely unnecessary, if we decide to stack all variables in one column
+
+    # y = Y[:,k-1] @ E[0,:].t()
+    # # embed
+    # for i in range(1,n):
+    #     y = torch.block_diag(y, Y[:,k-1] @ E[i,:].t())            
+
+    return z
 
 
 
@@ -184,8 +194,13 @@ def k_gamma(E, eta_gamma):                                                      
         return
 
 def Diff(x, dimension, embeddings, shift=1):
-    D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
+    # D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
+    offdiag = torch.diag(torch.ones(dimension), diagonal=shift)
+    D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])    # TODO: find better workaround
     return D @ x
+
+def generalised(A, dimension, embeddings):
+    kronecker
     
 
 # def FreeEnergy(y, mu_x, mu_v, mu_pi_z, mu_pi_w, A_gm, B_gm, F_gm):
@@ -207,15 +222,6 @@ def F(A, F, B, C, G, H, D, E, n, r, p, h, e_n, e_r, e_p, e_h, y, x, v, eta_v, th
     eps_eta = v - eta_v
     eps_theta = theta - k_theta(D, eta_theta)
     eps_gamma = gamma - k_gamma(E, eta_gamma)
-
-    # print(eps_v)
-    # print(eps_x)
-    # print(eps_eta)
-    # print(eps_theta)
-    # print(eps_gamma)
-    # print(torch.logdet(Pi_z))
-    # print(torch.logdet(Pi_w))
-
 
     return .5 * (eps_v.t() @ Pi_z @ eps_v + eps_x.t() @ Pi_w @ eps_x + eps_eta.t() @ Pi_v @ eps_eta + \
                 eps_theta.t() @ Pi_theta @ eps_theta + eps_gamma.t() @ Pi_gamma @ eps_gamma + \
