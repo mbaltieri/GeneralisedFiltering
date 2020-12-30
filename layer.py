@@ -24,8 +24,6 @@ class layer():
         self.T = T
         self.dt = dt
         self.iterations = int(T/dt)
-
-        self.F1 = F
         
         self.e_n = e_n                                                          # embedding dimension hidden states
         self.e_r = e_r                                                          # embedding dimension inputs
@@ -58,15 +56,15 @@ class layer():
         # TODO: for nonlinear systems, higher embedding orders of y, x, v 
         # should contain derivatives of functions f and g
         # self.y = functions.kronecker(torch.eye(self.e_n+1), torch.zeros(self.m, 1, requires_grad = True))             # observations
-        self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))             # states
+        # self.x = functions.kronecker(torch.eye(self.e_n+1), torch.rand(self.n, 1, requires_grad = True))              # states
         # self.v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))             # inputs
         # self.eta_v = functions.kronecker(torch.eye(self.e_r+1), torch.zeros(self.r, 1, requires_grad = True))         # prior on inputs
 
 
-        self.y = torch.zeros(self.m, self.e_n+1, requires_grad = True, device = DEVICE)             # observations
-        # self.x = torch.zeros(self.n, self.e_n+1, requires_grad = True, device = DEVICE)             # states
-        self.v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)             # inputs
-        self.eta_v = torch.zeros((self.e_r+1)*self.r, (self.e_r+1)*self.r, requires_grad = True, device = DEVICE)         # prior on inputs
+        self.y = torch.zeros(self.m*(self.e_n+1), 1, requires_grad = True, device = DEVICE)             # observations
+        self.x = torch.zeros(self.n*(self.e_n+1), 1, requires_grad = True, device = DEVICE)             # states
+        self.v = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)             # inputs
+        self.eta_v = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)         # prior on inputs
         
         ## parameters and hyperparameters ##
         if p == 0:                                                                  # if there are no parameters # TODO: in general or to learn?
@@ -136,10 +134,19 @@ class layer():
         self.v_history = torch.zeros(self.iterations, *self.v.shape)
         self.eta_v_history = torch.zeros(self.iterations, *self.eta_v.shape)
 
-        self.w_history = torch.zeros(self.iterations, self.n, self.e_n+1)
-        self.z_history = torch.zeros(self.iterations, self.m, self.e_n+1)
+        self.w_history = torch.zeros(self.iterations, *self.x.shape)
+        self.z_history = torch.zeros(self.iterations, *self.y.shape)
 
         self.F_history = torch.zeros(self.iterations, 1)
+
+
+        ### Run some simple checks
+        if self.A.size(0) != self.C.size(0):
+            print('State transition matrix and process noise matrix sizes don\'t match. Please check and try again.')
+            quit()
+        if self.F.size(0) != self.H.size(0):
+            print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
+            quit()
 
     
     def f(self, i):
@@ -182,14 +189,10 @@ class layer():
         # self.dw = functions.Diff(self.w, self.n, self.e_n+1)
         # self.dz = functions.Diff(self.z, self.m, self.e_n+1)
 
-        self.w = functions.spm_DEM_embed(self.wSmoothened, self.e_n+1, i, dt=self.dt)
-        self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=self.dt)
+        self.w = functions.spm_DEM_embed(self.wSmoothened, self.e_n+1, i, dt=1.)                # FIXME: This I don't fully understand, but if we impose dt < 1. here we get a weird behaviour, e.g., dt = 0.1 only the first 1/10 of the sequence is considered and then the noise is flat
+        self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=1.)                # FIXME: After chacking the above, find out if the precisions needs to be changed, following equation 55 of the DEM paper. So far no hint in the code.
 
         # self.dx = self.f(i) + self.C @ self.w[:,i,None]
-        print(self.w)
-        print(self.x)
-        aa = self.f(i)
-        aaa = self.C @ self.w
         self.dx = self.f(i) + self.C @ self.w
 
         # self.w[i+1,:,:] = self.w[i,:,:] + self.dt * self.dw
@@ -229,10 +232,11 @@ class layer():
         self.y = y.detach()
 
     def save_history(self, i):
-        self.y_history[i, :, :] = self.y
-        self.x_history[i, :, :] = self.x
-        self.v_history[i, :, :] = self.v
-        self.eta_v_history[i, :, :] = self.eta_v
+        self.y_history[i, :] = self.y
+        self.x_history[i, :] = self.x
+        self.v_history[i, :] = self.v
+        self.eta_v_history[i, :] = self.eta_v
 
-        self.w_history[i, :, :] = self.w
-        self.z_history[i, :, :] = self.z
+        if hasattr(self, 'w'):
+            self.w_history[i, :] = self.w
+            self.z_history[i, :] = self.z
