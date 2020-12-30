@@ -16,7 +16,7 @@ r = 2                               # inputs dimension
 p = 6                               # parameters dimension
 h = 3                               # hyperparameters dimension
 
-e_n = 2                             # embedding dimension hidden states
+e_n = 3                             # embedding dimension hidden states
 e_r = 0                             # embedding dimension inputs
 e_p = 0                             # embedding dimension parameters
 e_h = 0                             # embedding dimension hyperparameters
@@ -34,11 +34,10 @@ Sigma_z = torch.tensor([[.1, 0], [0, .1]], device=DEVICE)
 
 Sigma_w_GM = torch.tensor([[.1, 0.], [0., .1]], device=DEVICE)
 
-GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n, history=iterations)            # TODO: At the moment simulating only sequencies with Brownian motion, 
-                                                                            # since Gaussian autocorrelations introduce negative covariances that 
-                                                                            # can't truly be simulated (as far as I know), Karl has a way to build 
-                                                                            # generalised sequencies out of this so check spm
-GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n, history=iterations)
+dyda = []
+
+GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n)
+GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n)
 
 learning_rate = 5e-3
 learning_rate = 0.03
@@ -56,23 +55,20 @@ for i in range(iterations-1):
     F.backward()
 
     # Update weights using gradient descent
-    # print(GM.y)
-    # print(GM.x)
-    
+    dFdy = GM.y.grad
     dFdx = GM.x.grad
-    # print(GM.y)
-    # print(GM.x)
-    # print(dFdx)
-    # dFdv = GM.v.grad
-    # print(GM.Sigma_w)
-    # print(GM.Pi_w)
+    dFdv = GM.v.grad
     with torch.no_grad():
         GM.x -= learning_rate * dt * dFdx
-        # GM.v -= learning_rate * dt * dFdv
+        GM.v -= learning_rate * dt * dFdv
+    
+    # GP.setActions(a)
 
         # Manually zero the gradients after updating weights
         GM.x.grad = None
-        # GM.v.grad = None
+        GM.v.grad = None
+    
+
     
     GM.save_history(i)
 

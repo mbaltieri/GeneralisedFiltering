@@ -20,7 +20,7 @@ _small = torch.exp(torch.tensor(-32.))
 
 
 class layer():
-    def __init__(self, T, dt, A, F, B=0, G=0, Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=2., history=0):
+    def __init__(self, T, dt, A, F, B=0, G=0, Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=2., dyda=0):
         self.T = T
         self.dt = dt
         self.iterations = int(T/dt)
@@ -33,12 +33,14 @@ class layer():
         self.m = len(F)                                                         # observations dimension
         self.n = len(A)                                                         # hidden states dimension
         if B == 0:
-            self.r = 1                                                          # inputs dimension (dynamics)
-            B = torch.zeros(1, 1, device=DEVICE)                                               # input matrix (dynamics), default
+            self.r = 1                                                          # inputs dimension (external dynamics)
+            B = torch.zeros(1, 1, device=DEVICE)                                # input matrix (external dynamics), default
         else:
-            self.r = len(B[0])                                                  # inputs dimension (dynamics)
+            self.r = len(B[0])                                                  # inputs dimension (external dynamics)
+        if dyda == 0:
+            dyda = torch.zeros(1, 1, device=DEVICE)                                # input matrix (self-generated dynamics), default
         if G == 0:
-            G = torch.zeros(1, 1, device=DEVICE)                                               # input matrix (observations), default
+            G = torch.zeros(1, 1, device=DEVICE)                                # input matrix (observations), default
         self.p = p                                                              # parameters dimension
         self.h = h                                                              # hyperparameters dimension
 
@@ -49,7 +51,8 @@ class layer():
 
         # create block matrices considering higher embedding orders
         self.A = functions.kronecker(torch.eye(self.e_n+1), A)                  # state transition matrix
-        self.B = functions.kronecker(torch.eye(self.e_r+1), B)                  # input matrix (dynamics)
+        self.B_d = functions.kronecker(torch.eye(self.e_r+1), B)                # input matrix (external dynamics)
+        self.B_a = functions.kronecker(torch.eye(self.e_r+1), dyda)             # input matrix (self-generated dynamics)
         self.F = functions.kronecker(torch.eye(self.e_n+1), F)                  # observation matrix
         self.G = functions.kronecker(torch.eye(self.e_r+1), G)                  # input matrix (observations)
 
@@ -65,6 +68,8 @@ class layer():
         self.x = torch.zeros(self.n*(self.e_n+1), 1, requires_grad = True, device = DEVICE)             # states
         self.v = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)             # inputs
         self.eta_v = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)         # prior on inputs
+        self.a = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions
+        self.d = torch.zeros(self.r*(self.e_r+1), 1, requires_grad = True, device = DEVICE)             # external forces
         
         ## parameters and hyperparameters ##
         if p == 0:                                                                  # if there are no parameters # TODO: in general or to learn?
@@ -88,11 +93,12 @@ class layer():
         ## noise ##
         # TODO: include multiple different correlations if necessary
         self.phi = phi                                                                  # smoothness of temporal correlations
+        self.invphi = 1/phi                                                             # roughness of temporal correlations
 
         if len(Sigma_z) > 0:                                                            # if the model includes system noise
             # self.H = functions.symsqrt(Sigma_z)
             self.zSmoothened = functions.spm_DEM_z(self.m, self.phi, self.T, self.dt)
-            self.S_inv_z = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix observation noise, roughness
+            self.S_inv_z = functions.spm_DEM_R(self.e_n+1, self.invphi)                 # temporal precision matrix observation noise, roughness
             self.Sigma_z = functions.kronecker(self.S_inv_z, Sigma_z)                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
             self.Pi_z = self.Sigma_z.pinverse()                                         # precision matrix observation noise including higher embedding orders
             self.H = functions.symsqrt(self.Sigma_z)
@@ -107,7 +113,7 @@ class layer():
         if len(Sigma_w) > 0:                                                            # if the model includes measurement noise
             # self.C = functions.symsqrt(Sigma_w)
             self.wSmoothened = functions.spm_DEM_z(self.n, self.phi, self.T, self.dt)
-            self.S_inv_w = functions.temporalPrecisionMatrix(self.e_n+1, self.phi)      # temporal precision matrix system noise, roughness
+            self.S_inv_w = functions.spm_DEM_R(self.e_n+1, self.invphi)                 # temporal precision matrix system noise, roughness
             self.Sigma_w = functions.kronecker(self.S_inv_w, Sigma_w)                   # covariance matrix system noise including higher embedding orders
             self.Pi_w = self.Sigma_w.pinverse()                                         # precision matrix system noise including higher embedding orders
             self.C = functions.symsqrt(self.Sigma_w)
@@ -150,7 +156,7 @@ class layer():
 
     
     def f(self, i):
-        return functions.f(self.A, self.B, self.x, self.v)
+        return functions.f(self.A, self.B_d, self.B_a, self.x, self.d, self.a)
 
     def g(self, i):
         return functions.g(self.F, self.G, self.x, self.v)
@@ -190,7 +196,7 @@ class layer():
         # self.dz = functions.Diff(self.z, self.m, self.e_n+1)
 
         self.w = functions.spm_DEM_embed(self.wSmoothened, self.e_n+1, i, dt=1.)                # FIXME: This I don't fully understand, but if we impose dt < 1. here we get a weird behaviour, e.g., dt = 0.1 only the first 1/10 of the sequence is considered and then the noise is flat
-        self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=1.)                # FIXME: After chacking the above, find out if the precisions needs to be changed, following equation 55 of the DEM paper. So far no hint in the code.
+        self.z = functions.spm_DEM_embed(self.zSmoothened, self.e_n+1, i, dt=1.)                # FIXME: After chacking the above, find out if the precisions needs to be changed, following equation 55 of the DEM paper. So far no hint in the code, but maybe in spm_DEM_R?
 
         # self.dx = self.f(i) + self.C @ self.w[:,i,None]
         self.dx = self.f(i) + self.C @ self.w
@@ -229,6 +235,9 @@ class layer():
         # 1: Euler-Maruyama
     
     def setObservations(self, y):
+        self.y = y.detach()
+    
+    def setActions(self, a):
         self.y = y.detach()
 
     def save_history(self, i):
