@@ -110,33 +110,60 @@ import matplotlib.pyplot as plt
 
 
 
+# # test spm_DEM_embed
+
+# N = 2               # number of dimensions
+# genCoord = 4        # number of embedding orders
+# phi = 2.
+
+# dt = .01
+# T = 50
+# iterations = int(round(T/dt))
+
+# noiseNEW = spm_DEM_z(N, phi, T, dt)
+
+# noiseGENCOORD = torch.zeros(iterations, N*genCoord, genCoord)
+
+# for i in range(iterations):
+#     noiseGENCOORD[i,:,:] = spm_DEM_embed(noiseNEW, genCoord, i, dt=1.)
+
+# plt.figure()
+# for i in range(N*genCoord):
+#     for j in range(genCoord):
+#         plt.plot(noiseGENCOORD[:, i, j])
+
+# plt.figure()
+# for i in range(N):
+#     plt.plot(noiseNEW[i,:])
+# # print(noiseGENCOORD)
+
+# plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# test spm_DEM_R
 
 N = 2               # number of dimensions
-genCoord = 4        # number of embedding orders
-phi = 2.
+genCoord = 6        # number of embedding orders
+s = .5
 
+V = spm_DEM_R(genCoord, s)
 
-# test spm_DEM_embed
+print(V)
 
-dt = .01
-T = 50
-iterations = int(round(T/dt))
+V1 = temporalPrecisionMatrix(genCoord, s)
 
-noiseNEW = spm_DEM_z(N, phi, T, dt)
-
-noiseGENCOORD = torch.zeros(iterations, N*genCoord, genCoord)
-
-for i in range(iterations):
-    noiseGENCOORD[i,:,:] = spm_DEM_embed(noiseNEW, genCoord, i, dt=1.)
-
-plt.figure()
-for i in range(N*genCoord):
-    for j in range(genCoord):
-        plt.plot(noiseGENCOORD[:, i, j])
-
-plt.figure()
-for i in range(N):
-    plt.plot(noiseNEW[i,:])
-# print(noiseGENCOORD)
-
-plt.show()
+print(V1)
