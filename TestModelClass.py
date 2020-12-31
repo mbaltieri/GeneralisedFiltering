@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 # torch.autograd.set_detect_anomaly(True)
 
 dt = .01
-T = 30
+T = 50
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -25,19 +25,21 @@ delta = -1.50                                                # parameters simula
 epsilon = -10.0
 
 A = torch.tensor([[0, 1], [delta, epsilon]], device=DEVICE)
-F = torch.tensor([[1, 0], [1, 0], [1, 0], [1, 0]], device=DEVICE)
-F = torch.tensor([[1, 0], [0, 1]], device=DEVICE)
+A = torch.tensor([[0, 1, 0], [0, 0, 0], [0, 0, 0]], device=DEVICE)               # state transition matrix
+B_a = torch.tensor([[0, 0, 0], [0, 1, 0], [0, 0, 0]], device=DEVICE)                     # input matrix
+# F = torch.tensor([[1, 0], [1, 0], [1, 0], [1, 0]], device=DEVICE)
+F = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], device=DEVICE)
 
-Sigma_w = torch.tensor([[0., 0.], [0., .0001]], device=DEVICE)
+Sigma_w = torch.tensor([[0., 0., 0], [0., .0001, .0001], [0., .0, .0001]], device=DEVICE)
 Sigma_z = torch.tensor([[2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0, .5, 0.], [0., 0., 0., .25]], device=DEVICE)                       # TODO: tensor type deault is 'int64' but need float for pseudo-inverse
-Sigma_z = torch.tensor([[.1, 0], [0, .1]], device=DEVICE)
+Sigma_z = torch.tensor([[.1, 0, 0], [0, .1, 0], [0, 0, 1]], device=DEVICE)
 
-Sigma_w_GM = torch.tensor([[.1, 0.], [0., .1]], device=DEVICE)
+Sigma_w_GM = torch.tensor([[.1, 0., .0], [0., .1, .0], [.0, .0, .1]], device=DEVICE)
 
-dyda = []
+dyda = torch.ones(len(F), 1)
 
-GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n)
-GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n)
+GP = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
+GM = layer(T, dt, A=A, F=F, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z, e_n=e_n, dyda=dyda)
 
 learning_rate = 5e-3
 learning_rate = 0.03
@@ -55,15 +57,16 @@ for i in range(iterations-1):
     F.backward()
 
     # Update weights using gradient descent
-    dFdy = GM.y.grad
+    dFdy = GM.eps_v                                                                         # dFdeps_v is in fact equal to dFdy since dFdy = dFdeps_v * deps_vdy with deps_vdy always equal to 1
     dFdx = GM.x.grad
     dFdv = GM.v.grad
+    dFda = dFdy * GM.dyda
     with torch.no_grad():
         GM.x -= learning_rate * dt * dFdx
         GM.v -= learning_rate * dt * dFdv
-    
-    # GP.setActions(a)
 
+        GP.a -= learning_rate * dt * dFda
+    
         # Manually zero the gradients after updating weights
         GM.x.grad = None
         GM.v.grad = None
@@ -119,5 +122,10 @@ ax2.plot(range(iterations-1), GP.x_history[:-1,1].detach(), 'k')
 # ax5.plot(range(iterations-1), GP.zSmoothened[1,:-1].detach(), 'r')
 # ax5.plot(range(iterations-1), GP.zSmoothened[2,:-1].detach(), 'g')
 # ax5.plot(range(iterations-1), GP.zSmoothened[3,:-1].detach(), 'k')
+
+fig1 = plt.figure()
+ax1 = fig1.add_subplot(111)
+
+ax1.plot(range(iterations-1), GP.a_history[:-1,0].detach(), 'k')
 
 plt.show()
