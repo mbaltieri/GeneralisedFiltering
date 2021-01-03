@@ -11,7 +11,7 @@ torch.set_default_dtype(torch.float64)
 
 ### FUNCTIONS ###
 
-def symsqrt(matrix):                # code taken from https://github.com/pytorch/pytorch/issues/25481, while we still wait for sqrtm
+def symsqrt(matrix):                # code from https://github.com/pytorch/pytorch/issues/25481, while we still wait for sqrtm
                                     # SVD > Cholemsky since the obtained "square root" is symmetric, and not lower or upper triangular
     """Compute the square root of a positive definite matrix."""
     _, s, v = matrix.svd()
@@ -29,7 +29,7 @@ def symsqrt(matrix):                # code taken from https://github.com/pytorch
     return (v * s.sqrt().unsqueeze(-2)) @ v.transpose(-2, -1)
 
 
-def kronecker(A, B):
+def kronecker(A, B):                # code from https://discuss.pytorch.org/t/kronecker-product/3919/9, torch.kron is almost ready (probably torch 1.8?)
     return torch.einsum("ab,cd->acbd", A, B).view(A.size(0)*B.size(0),  A.size(1)*B.size(1))
 
 

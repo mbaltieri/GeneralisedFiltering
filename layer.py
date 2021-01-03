@@ -64,7 +64,7 @@ class layer():
 
 
         self.y = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
+        self.x = torch.randn(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
         self.u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
         self.a = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
         if len(eta_u) == 0:
@@ -98,7 +98,7 @@ class layer():
         ## noise ##
         self.phi = phi                                                          # smoothness of temporal correlations
         self.z = noise(self.T, self.dt, Sigma_z, self.n, self.e_sim, self.phi)
-        self.w = noise(self.T, self.dt, Sigma_z, self.n, self.e_sim, self.phi)
+        self.w = noise(self.T, self.dt, Sigma_w, self.n, self.e_sim, self.phi)
         self.v = noise(self.T, self.dt, Sigma_v, self.n, self.e_sim, self.phi)
 
         self.C = symsqrt(self.w.Sigma)
@@ -285,8 +285,9 @@ class layer():
             # 0: Local linearisation
             # 1: Euler-Maruyama
     
-    def setObservations(self, y):
+    def setObservations(self, y):                                                                   # TODO: check if there's a more elegant way of doing this
         self.y = y.detach()
+        self.y.requires_grad = True
     
     def saveHistoryVariables(self, i):
         self.y_history[i, :] = self.y
