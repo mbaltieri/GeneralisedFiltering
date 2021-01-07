@@ -2,9 +2,7 @@ import math
 import torch
 from functions import kronecker, symsqrt
 from scipy.linalg import toeplitz
-
-_large = torch.exp(torch.tensor(32.))
-_small = torch.exp(torch.tensor(-32.))
+from globalVariables import DEVICE, _small, _large
 
 class noise():                                                  # TODO: In the future, make this more 'OO-friendly', so far the methods are just direct translations of their spm counterparts for easier comparisons
     def __init__(self, T, dt, Sigma, n, e_n, phi):
@@ -29,14 +27,14 @@ class noise():                                                  # TODO: In the f
             self.Sigma = kronecker(self.S_inv, Sigma)                                                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
             self.Pi = self.Sigma.pinverse()                                                             # precision matrix observation noise including higher embedding orders
 
-            self.noise = torch.zeros(self.iterations, self.n*(self.e_n+1))
+            self.noise = torch.zeros(self.iterations, self.n*(self.e_n+1), device=DEVICE)
             for i in range(self.iterations):
                 self.noise[i, :] = self.spm_DEM_embed(self.noiseSmoothened, self.e_n+1, i)              # FIXME: This I don't fully understand, but if we impose dt < 1. here we get a weird behaviour, e.g., dt = 0.1 only the first 1/10 of the sequence is considered and then the noise is flat
                                                                                                         # FIXME: After chacking the above, find out if the precisions needs to be changed, following equation 55 of the DEM paper. So far no hint in the code, but maybe in spm_DEM_R?
         else:
-            self.Sigma = _large * torch.ones(self.n*(self.e_n+1), self.n*(self.e_n+1))
+            self.Sigma = _large * torch.ones(self.n*(self.e_n+1), self.n*(self.e_n+1), device=DEVICE)
             self.Pi = self.Sigma.pinverse()
-            self.z = torch.zeros(self.n*(self.e_n+1), 1)
+            self.z = torch.zeros(self.n*(self.e_n+1), 1, device=DEVICE)
 
 
     def spm_DEM_R(self, n, s):

@@ -3,9 +3,8 @@
 import math
 import torch
 from functions import kronecker, symsqrt, Diff
-from smoothNoise import _large, _small, noise
-
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+from smoothNoise import noise
+from globalVariables import DEVICE, _small
 
 # class odeSolver():
 #     def __init__(self):
@@ -62,16 +61,19 @@ class layer():
         self.G = kronecker(torch.eye(self.e_sim+1), self.G)                          # input matrix (observations)
         self.dyda = kronecker(torch.ones(self.e_sim+1,1), self.dyda)                 # (direct) influence of actions on observations  
 
-
-        self.y = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.randn(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
-        self.u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
-        self.a = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
+        # create variables
+        self.y = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
+        # self.x = torch.normal(0, 0.1, size=(self.iterations, self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)             # states
+        self.x = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
+        self.u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
+        self.a = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
         if len(eta_u) == 0:
-            self.eta_u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)     # prior on inputs
+            self.eta_u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)     # prior on inputs
         else:                                                                                               # if there is a prior, assign it
             try:
-                self.eta_u = kronecker(torch.ones(self.e_sim+1,1), eta_u)
+                self.eta_u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)        # FIXME: make sure to update eta_u in step too, otherwise priors won't get propagated
+                with torch.no_grad():
+                    self.eta_u[0,:,:] = kronecker(torch.ones(self.e_sim+1,1), eta_u)
             except RuntimeError:
                 print("Prior dimensions don't match. Please check and try again.")
                 quit()
@@ -114,6 +116,9 @@ class layer():
         ## dimensions checks ##                                     # TODO: put this earlier, interrupt before padding?
         self.runChecks()
 
+        # initialise variables
+        with torch.no_grad():
+            self.x[0,:] = torch.normal(0, 100., size=(self.sim*(self.e_sim+1), 1))
 
 
 
@@ -145,28 +150,28 @@ class layer():
 
     def history(self):
         # TODO: this should be used with parsimony to avoid the RAM blowing up for big models
-        self.y_history = torch.zeros(self.iterations, *self.y.shape)
-        self.x_history = torch.zeros(self.iterations, *self.x.shape)
-        self.u_history = torch.zeros(self.iterations, *self.u.shape)
-        self.a_history = torch.zeros(self.iterations, *self.a.shape)
-        self.eta_u_history = torch.zeros(self.iterations, *self.eta_u.shape)
+        self.y_history = torch.zeros(*self.y.shape, device = DEVICE)                                # TODO: remove this as it is now redundant with all the information in the original variables
+        self.x_history = torch.zeros(*self.x.shape, device = DEVICE)
+        self.u_history = torch.zeros(*self.u.shape, device = DEVICE)
+        self.a_history = torch.zeros(*self.a.shape, device = DEVICE)
+        self.eta_u_history = torch.zeros(*self.eta_u.shape, device = DEVICE)
 
         self.w_history = self.z.noise
         self.z_history = self.w.noise
 
-        self.F_history = torch.zeros(self.iterations, 1)
+        self.F_history = torch.zeros(self.iterations, 1, device = DEVICE)
 
-        self.eps_v_history = torch.zeros(self.iterations, *self.y.shape)
-        self.eps_x_history = torch.zeros(self.iterations, *self.x.shape)
-        self.eps_eta_history = torch.zeros(self.iterations, *self.u.shape)
-        self.eps_theta_history = torch.zeros(self.iterations, *self.theta.shape)
-        self.eps_gamma_history = torch.zeros(self.iterations, *self.gamma.shape)
+        self.eps_v_history = torch.zeros(*self.y.shape, device = DEVICE)
+        self.eps_x_history = torch.zeros(*self.x.shape, device = DEVICE)
+        self.eps_eta_history = torch.zeros(*self.u.shape, device = DEVICE)
+        self.eps_theta_history = torch.zeros(self.iterations, *self.theta.shape, device = DEVICE)
+        self.eps_gamma_history = torch.zeros(self.iterations, *self.gamma.shape, device = DEVICE)
 
-        self.xi_v_history = torch.zeros(*self.eps_v_history.shape)
-        self.xi_x_history = torch.zeros(*self.eps_x_history.shape)
-        self.xi_eta_history = torch.zeros(*self.eps_eta_history.shape)
-        self.xi_theta_history = torch.zeros(*self.eps_theta_history.shape)
-        self.xi_gamma_history = torch.zeros(*self.eps_gamma_history.shape)
+        self.xi_v_history = torch.zeros(*self.eps_v_history.shape, device = DEVICE)
+        self.xi_x_history = torch.zeros(*self.eps_x_history.shape, device = DEVICE)
+        self.xi_eta_history = torch.zeros(*self.eps_eta_history.shape, device = DEVICE)
+        self.xi_theta_history = torch.zeros(*self.eps_theta_history.shape, device = DEVICE)
+        self.xi_gamma_history = torch.zeros(*self.eps_gamma_history.shape, device = DEVICE)
 
     def checkControl(self):
         if (len(self.B_u) != 0) or (len(self.B_a) != 0):
@@ -194,18 +199,30 @@ class layer():
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
 
-    def f(self):
+    def f(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
+            # print(self.A)
+            # print(self.x)
+            # print(self.B_u)
+            # print(self.u)
+            # print(self.B_a)
+            # print(self.a[i,:])
+            # print(self.B_a @ self.a[i,:])
+            # print(self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a)
+            # self.somebody = self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
+            # self.x.register_hook(lambda b: print(b))
+            return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
         except RuntimeError:
             print("Dimensions don't match!")
             return
 
-    def g(self):
+    def g(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.F @ self.x + self.G @ self.u
+            self.something = self.F @ self.x[i,:] + self.G @ self.u[i,:]
+            # self.x.register_hook(lambda b: print(b))
+            return self.something
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -227,13 +244,19 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        self.eps_v = self.y - self.g()
-        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f()
-        self.eps_eta = self.u - self.eta_u
+        def hook(grad):
+            print(grad)
+            h.remove()
+        self.eps_v = self.y[i,:] - self.g(i)
+        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f(i)
+        # self.x.register_hook(lambda b: print(b))
+        # h = self.x.register_hook(hook)
+        # print(self.eps_x)
+        self.eps_eta = self.u[i,:] - self.eta_u[i,:]
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
 
-        # weighted prediction errors (useful for debugging at least, could be used in free energy calculation)
+        # weighted prediction errors
         self.xi_v = self.Pi_z @ self.eps_v
         self.xi_x = self.Pi_w @ self.eps_x
         self.xi_eta = self.Pi_v @ self.eps_eta
@@ -242,18 +265,18 @@ class layer():
 
         self.saveHistoryPredictionErrors(i)
 
-    def free_energy(self, i): 
+    def free_energy(self, i):
         self.prediction_errors(i)
 
-        self.F_history[i] = .5 * (self.eps_v.t() @ self.Pi_z @ self.eps_v + self.eps_x.t() @ self.Pi_w @ self.eps_x + self.eps_eta.t() @ self.Pi_v @ self.eps_eta + \
-                            self.eps_theta.t() @ self.Pi_theta @ self.eps_theta + self.eps_gamma.t() @ self.Pi_gamma @ self.eps_gamma + \
-                            ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())     # TODO: add more terms due to the variational Gaussian approximation?
+        # self.F_history[i] = .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
+        #                     self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
+        #                     ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+        #                     torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())     # TODO: add more terms due to the variational Gaussian approximation?
 
-        return .5 * (self.eps_v.t() @ self.Pi_z @ self.eps_v + self.eps_x.t() @ self.Pi_w @ self.eps_x + self.eps_eta.t() @ self.Pi_v @ self.eps_eta + \
-                    self.eps_theta.t() @ self.Pi_theta @ self.eps_theta + self.eps_gamma.t() @ self.Pi_gamma @ self.eps_gamma + \
-                    ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-                    torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())
+        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
+                            self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
+                            ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())
 
     def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
@@ -261,9 +284,9 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f() + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x = self.x + self.dt * self.dx
-        self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
+        self.x[i+1,:] = self.x[i,:] + self.dt * self.dx
+        self.y[i+1,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
         ### from spm_ADEM_diff
@@ -289,12 +312,12 @@ class layer():
         self.y = y.detach()
         self.y.requires_grad = True
     
-    def saveHistoryVariables(self, i):
-        self.y_history[i, :] = self.y
-        self.x_history[i, :] = self.x
-        self.u_history[i, :] = self.u
-        self.a_history[i, :] = self.a
-        self.eta_u_history[i, :] = self.eta_u
+    def saveHistoryVariables(self, i):                                                              # TODO: remove
+        self.y_history = self.y
+        self.x_history = self.x
+        self.u_history = self.u
+        self.a_history = self.a
+        self.eta_u_history = self.eta_u
 
     def saveHistoryPredictionErrors(self, i):
         self.eps_v_history[i, :] = self.eps_v
@@ -303,6 +326,7 @@ class layer():
         self.eps_theta_history[i, :] = self.eps_theta
         self.eps_gamma_history[i, :] = self.eps_gamma
 
+    
         self.xi_v_history[i, :] = self.xi_v
         self.xi_x_history[i, :] = self.xi_x
         self.xi_eta_history[i, :] = self.xi_eta
