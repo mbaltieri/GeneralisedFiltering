@@ -14,7 +14,9 @@ from globalVariables import DEVICE, _small
 
 
 class layer():
-    def __init__(self, T, dt, A, F, B_u=[], B_a=[], G=[], Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=.5, dyda=[], eta_u=[]):
+    def __init__(self, flag, T, dt, A, F, B_u=[], B_a=[], G=[], Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=.5, dyda=[], eta_u=[]):
+        self.flag = flag
+
         self.T = T
         self.dt = dt
         self.iterations = int(T/dt)
@@ -99,9 +101,9 @@ class layer():
 
         ## noise ##
         self.phi = phi                                                          # smoothness of temporal correlations
-        self.z = noise(self.T, self.dt, Sigma_z, self.n, self.e_sim, self.phi)
-        self.w = noise(self.T, self.dt, Sigma_w, self.n, self.e_sim, self.phi)
-        self.v = noise(self.T, self.dt, Sigma_v, self.n, self.e_sim, self.phi)
+        self.z = noise(self.flag, self.T, self.dt, Sigma_z, self.n, self.e_sim, self.phi)
+        self.w = noise(self.flag, self.T, self.dt, Sigma_w, self.n, self.e_sim, self.phi)
+        self.v = noise(self.flag, self.T, self.dt, Sigma_v, self.n, self.e_sim, self.phi)
 
         self.C = symsqrt(self.w.Sigma)
         self.H = symsqrt(self.z.Sigma)
@@ -118,7 +120,7 @@ class layer():
 
         # initialise variables
         with torch.no_grad():
-            self.x[0,:] = torch.normal(0, 100., size=(self.sim*(self.e_sim+1), 1))
+            self.x[0,:] = torch.normal(0, 1., size=(self.sim*(self.e_sim+1), 1))
 
 
 
@@ -156,8 +158,9 @@ class layer():
         self.a_history = torch.zeros(*self.a.shape, device = DEVICE)
         self.eta_u_history = torch.zeros(*self.eta_u.shape, device = DEVICE)
 
-        self.w_history = self.z.noise
-        self.z_history = self.w.noise
+        if self.flag == 'GP':
+            self.w_history = self.z.noise
+            self.z_history = self.w.noise
 
         self.F_history = torch.zeros(self.iterations, 1, device = DEVICE)
 
@@ -203,7 +206,29 @@ class layer():
         # TODO: generalise this to include nonlinear treatments
         try:
             # print(self.A)
-            # print(self.x)
+            # print(self.x[i,:])
+            # print(self.A @ self.x[i,:])
+            # print(self.B_u)
+            # print(self.u[i,:])
+            # print(self.B_u @ self.u[i,:])
+            # print(self.B_a)
+            # print(self.a[i,:])
+            # print(self.B_a @ self.a[i,:])
+            # print(self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:])
+            # self.somebody = self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
+            # self.x.register_hook(lambda b: print(b))
+            return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
+        except RuntimeError:
+            print("Dimensions don't match!")
+            return
+    
+    def f_gm(self, i):
+        # TODO: generalise this to include nonlinear treatments
+        # self.h = self.x.register_hook(self.hook)
+        try:
+            # print(self.A)
+            # print(self.x[i,:])
+            # print(self.A @ self.x[i,:])
             # print(self.B_u)
             # print(self.u)
             # print(self.B_a)
@@ -219,10 +244,9 @@ class layer():
 
     def g(self, i):
         # TODO: generalise this to include nonlinear treatments
+        # self.h = self.x.register_hook(self.hook)
         try:
-            self.something = self.F @ self.x[i,:] + self.G @ self.u[i,:]
-            # self.x.register_hook(lambda b: print(b))
-            return self.something
+            return self.F @ self.x[i,:] + self.G @ self.u[i,:]
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -244,13 +268,14 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        def hook(grad):
-            print(grad)
-            h.remove()
         self.eps_v = self.y[i,:] - self.g(i)
-        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f(i)
+        self.eps_v.retain_grad()
+        # print(Diff(self.x[i,:], self.n, self.e_sim+1))
+        # print(self.f_gm(i))
+        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f_gm(i)
+        self.eps_x.retain_grad()
         # self.x.register_hook(lambda b: print(b))
-        # h = self.x.register_hook(hook)
+        # self.h = self.x.register_hook(self.hook)
         # print(self.eps_x)
         self.eps_eta = self.u[i,:] - self.eta_u[i,:]
         self.eps_theta = self.theta - self.k_theta()
@@ -258,6 +283,7 @@ class layer():
 
         # weighted prediction errors
         self.xi_v = self.Pi_z @ self.eps_v
+        self.xi_v.retain_grad()
         self.xi_x = self.Pi_w @ self.eps_x
         self.xi_eta = self.Pi_v @ self.eps_eta
         self.xi_theta = self.Pi_theta @ self.eps_theta
@@ -266,17 +292,21 @@ class layer():
         self.saveHistoryPredictionErrors(i)
 
     def free_energy(self, i):
+        # self.h = self.x.register_hook(self.hook)
         self.prediction_errors(i)
+        # self.h = self.x.register_hook(self.hook)
 
         # self.F_history[i] = .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
         #                     self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
         #                     ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
         #                     torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())     # TODO: add more terms due to the variational Gaussian approximation?
 
-        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
-                            self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
-                            ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())
+        # return .5 * (self.eps_x.t() @ self.xi_x)
+        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta)
+        #  + \
+        #                     self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
+        #                     ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+        #                     torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())
 
     def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
@@ -284,9 +314,9 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x[i+1,:] = self.x[i,:] + self.dt * self.dx
-        self.y[i+1,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.dx = self.f(i)# + self.C @ self.w.noise[i,:].unsqueeze(1)
+        self.x[i+1,:] = self.x[i,:] + self.dt * Diff(self.dx, self.sim, self.e_sim+1, shift=-1)
+        self.y[i,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
         ### from spm_ADEM_diff
@@ -325,10 +355,13 @@ class layer():
         self.eps_eta_history[i, :] = self.eps_eta
         self.eps_theta_history[i, :] = self.eps_theta
         self.eps_gamma_history[i, :] = self.eps_gamma
-
     
         self.xi_v_history[i, :] = self.xi_v
         self.xi_x_history[i, :] = self.xi_x
         self.xi_eta_history[i, :] = self.xi_eta
         self.xi_theta_history[i, :] = self.xi_theta
         self.xi_gamma_history[i, :] = self.xi_gamma
+
+    def hook(self, grad):
+        print(grad)
+        self.h.remove()

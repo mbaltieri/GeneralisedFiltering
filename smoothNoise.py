@@ -5,7 +5,7 @@ from scipy.linalg import toeplitz
 from globalVariables import DEVICE, _small, _large
 
 class noise():                                                  # TODO: In the future, make this more 'OO-friendly', so far the methods are just direct translations of their spm counterparts for easier comparisons
-    def __init__(self, T, dt, Sigma, n, e_n, phi):
+    def __init__(self, flag, T, dt, Sigma, n, e_n, phi):
         
         # n: number of variables
         # e_n: embedding orders
@@ -22,14 +22,15 @@ class noise():                                                  # TODO: In the f
         self.phi = phi
 
         if len(Sigma) > 0:
-            self.noiseSmoothened = self.spm_DEM_z(self.n, self.phi, self.T, self.dt)
             self.S_inv = self.spm_DEM_R(self.e_n+1, self.phi)                                           # temporal precision matrix observation noise, roughness
             self.Sigma = kronecker(self.S_inv, Sigma)                                                   # covariance matrix observation noise including higher embedding orders # TODO: find a torch based version of the krocker product
             self.Pi = self.Sigma.pinverse()                                                             # precision matrix observation noise including higher embedding orders
 
-            self.noise = torch.zeros(self.iterations, self.n*(self.e_n+1), device=DEVICE)
-            for i in range(self.iterations):
-                self.noise[i, :] = self.spm_DEM_embed(self.noiseSmoothened, self.e_n+1, i)              # FIXME: This I don't fully understand, but if we impose dt < 1. here we get a weird behaviour, e.g., dt = 0.1 only the first 1/10 of the sequence is considered and then the noise is flat
+            if flag == 'GP':
+                self.noiseSmoothened = self.spm_DEM_z(self.n, self.phi, self.T, self.dt)
+                self.noise = torch.zeros(self.iterations, self.n*(self.e_n+1), device=DEVICE)
+                for i in range(self.iterations):
+                    self.noise[i, :] = self.spm_DEM_embed(self.noiseSmoothened, self.e_n+1, i)          # FIXME: This I don't fully understand, but if we impose dt < 1. here we get a weird behaviour, e.g., dt = 0.1 only the first 1/10 of the sequence is considered and then the noise is flat
                                                                                                         # FIXME: After chacking the above, find out if the precisions needs to be changed, following equation 55 of the DEM paper. So far no hint in the code, but maybe in spm_DEM_R?
         else:
             self.Sigma = _large * torch.ones(self.n*(self.e_n+1), self.n*(self.e_n+1), device=DEVICE)
@@ -38,7 +39,7 @@ class noise():                                                  # TODO: In the f
 
 
     def spm_DEM_R(self, n, s):
-        # function adapted and nplied from SPM, original description below; this is now in use as it is much faster for higher numbers of generalised coordinates
+        # function adapted and simplied from SPM, original description below; this is now in use as it is much faster for higher numbers of generalised coordinates
         # TODO: include multiple different correlations if necessary, for now only Gaussian
 
         # function [R,V] = spm_DEM_R(n,s,form)

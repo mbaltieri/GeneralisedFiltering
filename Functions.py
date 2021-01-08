@@ -36,5 +36,8 @@ def kronecker(A, B):                # code from https://discuss.pytorch.org/t/kr
 def Diff(x, dimension, embeddings, shift=1):
     # D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
     offdiag = torch.diag(torch.ones(dimension), diagonal=shift)
-    D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])    # TODO: find better workaround
+    if shift >= 0:
+        D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])    # TODO: find better workaround
+    else:
+        D = kronecker(torch.eye(embeddings), offdiag[:shift,:shift])    # TODO: find better workaround
     return D @ x
