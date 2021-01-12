@@ -84,10 +84,6 @@ eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                         
 GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
 GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
 
-learning_rate = 5e-3
-learning_rate = 1.
-learning_rate_action = 1.
-
 for i in range(iterations-1):
     GP.saveHistoryVariables(i)
     GM.saveHistoryVariables(i)
@@ -109,9 +105,9 @@ for i in range(iterations-1):
     dFdu = GM.u.grad[i,:]
     dFda = GM.dyda @ dFdy
     with torch.no_grad():
-        GM.x[i+1,:] = GM.x[i,:] + dt * learning_rate * (Diff(GM.x[i,:], GM.sim, GM.e_sim+1) - dFdx)
-        GM.u[i+1,:] = GM.u[i,:] + dt * learning_rate * (Diff(GM.u[i,:], GM.sim, GM.e_sim+1) - dFdu)
-        GP.a[i+1,:] = - learning_rate_action * dFda
+        GM.x[i+1,:] = GM.x[i,:] + dt * (Diff(GM.x[i,:], GM.sim, GM.e_sim+1) - dFdx)
+        GM.u[i+1,:] = GM.u[i,:] + dt * (Diff(GM.u[i,:], GM.sim, GM.e_sim+1) - dFdu)
+        GP.a[i+1,:] = - dFda
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None
