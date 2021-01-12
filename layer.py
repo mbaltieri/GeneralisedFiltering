@@ -233,30 +233,6 @@ class layer():
             print("Dimensions don't match!")
             return
 
-    def prediction_errors(self, i):
-        self.eps_v = self.y[i,:] - self.g(i)
-        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f(i)
-        self.eps_eta = self.u[i,:] - self.eta_u[i,:]
-        self.eps_theta = self.theta - self.k_theta()
-        self.eps_gamma = self.gamma - self.k_gamma()
-
-        # weighted prediction errors
-        self.xi_v = self.Pi_z @ self.eps_v
-        self.xi_v.retain_grad()
-        self.xi_x = self.Pi_w @ self.eps_x
-        self.xi_eta = self.Pi_v @ self.eps_eta
-        self.xi_theta = self.Pi_theta @ self.eps_theta
-        self.xi_gamma = self.Pi_gamma @ self.eps_gamma
-
-        self.saveHistoryPredictionErrors(i)
-
-    def free_energy(self, i):
-        self.prediction_errors(i)
-        
-        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
-                            self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
-                            ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())           # TODO: add more terms due to the variational Gaussian approximation?
 
     def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
@@ -298,19 +274,6 @@ class layer():
         self.u_history = self.u
         self.a_history = self.a
         self.eta_u_history = self.eta_u
-
-    def saveHistoryPredictionErrors(self, i):
-        self.eps_v_history[i, :] = self.eps_v
-        self.eps_x_history[i, :] = self.eps_x
-        self.eps_eta_history[i, :] = self.eps_eta
-        self.eps_theta_history[i, :] = self.eps_theta
-        self.eps_gamma_history[i, :] = self.eps_gamma
-    
-        self.xi_v_history[i, :] = self.xi_v
-        self.xi_x_history[i, :] = self.xi_x
-        self.xi_eta_history[i, :] = self.xi_eta
-        self.xi_theta_history[i, :] = self.xi_theta
-        self.xi_gamma_history[i, :] = self.xi_gamma
 
     def hook(self, grad):
         print(grad)
