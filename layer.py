@@ -65,7 +65,6 @@ class layer():
 
         # create variables
         self.y = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        # self.x = torch.normal(0, 0.1, size=(self.iterations, self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)             # states
         self.x = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
         self.u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
         self.a = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
@@ -120,7 +119,7 @@ class layer():
 
         # initialise variables
         with torch.no_grad():
-            self.x[0,:] = torch.normal(0, 1., size=(self.sim*(self.e_sim+1), 1))
+            self.x[0,:] = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1))
 
 
 
@@ -205,46 +204,13 @@ class layer():
     def f(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            # print(self.A)
-            # print(self.x[i,:])
-            # print(self.A @ self.x[i,:])
-            # print(self.B_u)
-            # print(self.u[i,:])
-            # print(self.B_u @ self.u[i,:])
-            # print(self.B_a)
-            # print(self.a[i,:])
-            # print(self.B_a @ self.a[i,:])
-            # print(self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:])
-            # self.somebody = self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
-            # self.x.register_hook(lambda b: print(b))
             return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
         except RuntimeError:
             print("Dimensions don't match!")
             return
     
-    def f_gm(self, i):
-        # TODO: generalise this to include nonlinear treatments
-        # self.h = self.x.register_hook(self.hook)
-        try:
-            # print(self.A)
-            # print(self.x[i,:])
-            # print(self.A @ self.x[i,:])
-            # print(self.B_u)
-            # print(self.u)
-            # print(self.B_a)
-            # print(self.a[i,:])
-            # print(self.B_a @ self.a[i,:])
-            # print(self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a)
-            # self.somebody = self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
-            # self.x.register_hook(lambda b: print(b))
-            return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
-        except RuntimeError:
-            print("Dimensions don't match!")
-            return
-
     def g(self, i):
         # TODO: generalise this to include nonlinear treatments
-        # self.h = self.x.register_hook(self.hook)
         try:
             return self.F @ self.x[i,:] + self.G @ self.u[i,:]
         except RuntimeError:
@@ -269,14 +235,7 @@ class layer():
 
     def prediction_errors(self, i):
         self.eps_v = self.y[i,:] - self.g(i)
-        self.eps_v.retain_grad()
-        # print(Diff(self.x[i,:], self.n, self.e_sim+1))
-        # print(self.f_gm(i))
-        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f_gm(i)
-        self.eps_x.retain_grad()
-        # self.x.register_hook(lambda b: print(b))
-        # self.h = self.x.register_hook(self.hook)
-        # print(self.eps_x)
+        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f(i)
         self.eps_eta = self.u[i,:] - self.eta_u[i,:]
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
@@ -292,21 +251,12 @@ class layer():
         self.saveHistoryPredictionErrors(i)
 
     def free_energy(self, i):
-        # self.h = self.x.register_hook(self.hook)
         self.prediction_errors(i)
-        # self.h = self.x.register_hook(self.hook)
-
-        # self.F_history[i] = .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
-        #                     self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
-        #                     ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-        #                     torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())     # TODO: add more terms due to the variational Gaussian approximation?
-
-        # return .5 * (self.eps_x.t() @ self.xi_x)
-        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta)
-        #  + \
-        #                     self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
-        #                     ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-        #                     torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())
+        
+        return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
+                            self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
+                            ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
+                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())           # TODO: add more terms due to the variational Gaussian approximation?
 
     def step(self, i):
         # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
@@ -314,8 +264,8 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f(i)# + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x[i+1,:] = self.x[i,:] + self.dt * Diff(self.dx, self.sim, self.e_sim+1, shift=-1)
+        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
+        self.x[i+1,:] = self.x[i,:] + self.dt * self.dx
         self.y[i,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
