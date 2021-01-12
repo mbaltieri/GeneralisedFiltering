@@ -265,7 +265,9 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
+        self.dx = self.f(i)# + self.C @ self.w.noise[i,:].unsqueeze(1)
+        # print(self.dx)
+        # print(self.a)
         self.x = self.x + self.dt * self.dx
         self.y = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 

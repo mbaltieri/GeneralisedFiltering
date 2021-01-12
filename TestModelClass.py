@@ -38,8 +38,8 @@ e_h = 0                             # embedding dimension hyperparameters
 
 ## generative process
 
-A = torch.tensor([[0., 1., 0], [0., 0., 1.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
-B_a = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 1.]], device=DEVICE)               # input matrix (dynamics)
+A = torch.tensor([[0., 1., 0], [0., 0., 0.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
+B_a = torch.tensor([[0., 0., 0.], [0., 1., 0.], [0., 0., 0.]], device=DEVICE)               # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
 sigma_z_log = torch.tensor([-3.], device=DEVICE)                                     # log-precision
@@ -77,7 +77,7 @@ sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [0., 0., 0.], [1., 1., 1.]], device=DEVICE)
+dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [0., 0., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
@@ -108,11 +108,11 @@ for i in range(iterations-1):
         # integrate using Euler-Maruyama
         GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
         GM.v = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
-        GP.a = - dFda
+        GP.a = GP.a + dt * (- dFda)
 
         # integrate using Local-linearisation
-        inputs = torch.empty(1, requires_grad=True)
-        H = torch.autograd.functional.hessian(GM.free_energy(i), inputs)
+        # inputs = torch.empty(1, requires_grad=True)
+        # H = torch.autograd.functional.hessian(GM.free_energy(i), inputs)
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None
