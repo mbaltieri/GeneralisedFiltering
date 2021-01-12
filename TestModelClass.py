@@ -38,14 +38,14 @@ e_h = 0                             # embedding dimension hyperparameters
 
 ## generative process
 
-A = torch.tensor([[0., 1., 0], [0., 0., 1.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
-B_a = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 1.]], device=DEVICE)               # input matrix (dynamics)
+A = torch.tensor([[0., 1., 0], [0., 0., 0.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
+B_a = torch.tensor([[0., 0., 0.], [0., 1., 0.], [0., 0., 0.]], device=DEVICE)               # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
 sigma_z_log = torch.tensor([-3.], device=DEVICE)                                     # log-precision
 sigma_z = torch.exp(sigma_z_log)
 Sigma_z = torch.tensor([[sigma_z, 0., 0.], [0., sigma_z, 0.], 
-            [0., 0, sigma_z]], device=DEVICE)                                       # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
+            [0., 0, 0.]], device=DEVICE)                                       # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
 
 sigma_w_log = torch.tensor([-3.], device=DEVICE)                                     # log-precision
 sigma_w = torch.exp(sigma_w_log)
@@ -77,14 +77,14 @@ sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [0., 0., 0.], [1., 1., 1.]], device=DEVICE)
+dyda = torch.exp(torch.tensor([2.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
 GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
 GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
 
-for i in range(iterations-1):
+for i in range(1,iterations-1):
     GP.saveHistoryVariables(i)
     GM.saveHistoryVariables(i)
 
@@ -100,14 +100,14 @@ for i in range(iterations-1):
     F.backward()
 
     # Update weights using gradient descent
-    dFdy = GM.y.grad[i,:]
-    dFdx = GM.x.grad[i,:]
-    dFdu = GM.u.grad[i,:]
+    dFdy = GM.y.grad[i-1,:]
+    dFdx = GM.x.grad[i-1,:]
+    dFdu = GM.u.grad[i-1,:]
     dFda = GM.dyda @ dFdy
     with torch.no_grad():
-        GM.x[i+1,:] = GM.x[i,:] + dt * (Diff(GM.x[i,:], GM.sim, GM.e_sim+1) - dFdx)
-        GM.u[i+1,:] = GM.u[i,:] + dt * (Diff(GM.u[i,:], GM.sim, GM.e_sim+1) - dFdu)
-        GP.a[i+1,:] = - dFda
+        GM.x[i,:] = GM.x[i-1,:] + dt * (Diff(GM.x[i,:], GM.sim, GM.e_sim+1) - dFdx)
+        GM.u[i,:] = GM.u[i-1,:] + dt * (Diff(GM.u[i,:], GM.sim, GM.e_sim+1) - dFdu)
+        GP.a[i,:] = GP.a[i-1,:] - dt * GM.eps_v[1]
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None

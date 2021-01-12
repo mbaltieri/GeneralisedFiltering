@@ -119,7 +119,7 @@ class layer():
 
         # initialise variables
         with torch.no_grad():
-            self.x[0,:] = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1))
+            self.x[0,:2] = torch.normal(0, 10, size=((self.sim-1)*(self.e_sim+1), 1))
 
 
 
@@ -204,7 +204,7 @@ class layer():
     def f(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
+            return self.A @ self.x[i-1,:] + self.B_u @ self.u[i-1,:] + self.B_a @ self.a[i-1,:]
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -212,7 +212,7 @@ class layer():
     def g(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.F @ self.x[i,:] + self.G @ self.u[i,:]
+            return self.F @ self.x[i-1,:] + self.G @ self.u[i-1,:]
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -265,7 +265,7 @@ class layer():
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
         self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x[i+1,:] = self.x[i,:] + self.dt * self.dx
+        self.x[i,:] = self.x[i-1,:] + self.dt * self.dx
         self.y[i,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
