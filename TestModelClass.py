@@ -100,19 +100,27 @@ for i in range(iterations-1):
     F.backward()
 
     # Update weights using gradient descent
-    dFdy = GM.y.grad[i,:]
-    dFdx = GM.x.grad[i,:]
-    dFdu = GM.u.grad[i,:]
+    dFdy = GM.y.grad
+    dFdx = GM.x.grad
+    dFdu = GM.u.grad
     dFda = GM.dyda @ dFdy
     with torch.no_grad():
-        GM.x[i+1,:] = GM.x[i,:] + dt * (Diff(GM.x[i,:], GM.sim, GM.e_sim+1) - dFdx)
-        GM.u[i+1,:] = GM.u[i,:] + dt * (Diff(GM.u[i,:], GM.sim, GM.e_sim+1) - dFdu)
-        GP.a[i+1,:] = - dFda
+        # integrate using Euler-Maruyama
+        GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
+        GM.v = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
+        GP.a = - dFda
+
+        # integrate using Local-linearisation
+        inputs = torch.empty(1, requires_grad=True)
+        H = torch.autograd.functional.hessian(GM.free_energy(i), inputs)
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None
         GM.x.grad = None
         GM.u.grad = None
+
+        GM.x.requires_grad = True                                               # FIXME: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
+        GM.v.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
 
 plt.figure()
 plt.plot(GM.y_history[:-1,0].detach(), GM.y_history[:-1,1].detach(), 'b')
@@ -145,7 +153,7 @@ fig1 = plt.figure()
 ax1 = fig1.add_subplot(111)
 ax1.plot(range(iterations-1), GP.a_history[:-1,0].detach(), 'b')
 ax1.plot(range(iterations-1), GP.a_history[:-1,1].detach(), 'r')
-# ax1.plot(range(iterations-1), GP.a_history[:-1,2].detach(), 'k')
+ax1.plot(range(iterations-1), GP.a_history[:-1,2].detach(), 'k')
 
 fig2 = plt.figure(figsize=(15,5))
 plt.title('Prediction errors')

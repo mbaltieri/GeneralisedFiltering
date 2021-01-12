@@ -64,17 +64,18 @@ class layer():
         self.dyda = kronecker(torch.ones(self.e_sim+1,1), self.dyda)                 # (direct) influence of actions on observations  
 
         # create variables
-        self.y = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
-        self.u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
-        self.a = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
+        self.y = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
+        self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)
+        # self.x = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
+        self.u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
+        self.a = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
         if len(eta_u) == 0:
-            self.eta_u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)     # prior on inputs
+            self.eta_u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)     # prior on inputs
         else:                                                                                               # if there is a prior, assign it
             try:
-                self.eta_u = torch.zeros(self.iterations, self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)        # FIXME: make sure to update eta_u in step too, otherwise priors won't get propagated
+                # self.eta_u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)        # FIXME: make sure to update eta_u in step too, otherwise priors won't get propagated
                 with torch.no_grad():
-                    self.eta_u[0,:,:] = kronecker(torch.ones(self.e_sim+1,1), eta_u)
+                    self.eta_u = kronecker(torch.ones(self.e_sim+1,1), eta_u)
             except RuntimeError:
                 print("Prior dimensions don't match. Please check and try again.")
                 quit()
@@ -118,8 +119,8 @@ class layer():
         self.runChecks()
 
         # initialise variables
-        with torch.no_grad():
-            self.x[0,:] = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1))
+        # with torch.no_grad():
+        #     self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1))
 
 
 
@@ -151,11 +152,11 @@ class layer():
 
     def history(self):
         # TODO: this should be used with parsimony to avoid the RAM blowing up for big models
-        self.y_history = torch.zeros(*self.y.shape, device = DEVICE)                                # TODO: remove this as it is now redundant with all the information in the original variables
-        self.x_history = torch.zeros(*self.x.shape, device = DEVICE)
-        self.u_history = torch.zeros(*self.u.shape, device = DEVICE)
-        self.a_history = torch.zeros(*self.a.shape, device = DEVICE)
-        self.eta_u_history = torch.zeros(*self.eta_u.shape, device = DEVICE)
+        self.y_history = torch.zeros(self.iterations, *self.y.shape, device = DEVICE)                                # TODO: remove this as it is now redundant with all the information in the original variables
+        self.x_history = torch.zeros(self.iterations, *self.x.shape, device = DEVICE)
+        self.u_history = torch.zeros(self.iterations, *self.u.shape, device = DEVICE)
+        self.a_history = torch.zeros(self.iterations, *self.a.shape, device = DEVICE)
+        self.eta_u_history = torch.zeros(self.iterations, *self.eta_u.shape, device = DEVICE)
 
         if self.flag == 'GP':
             self.w_history = self.z.noise
@@ -163,9 +164,9 @@ class layer():
 
         self.F_history = torch.zeros(self.iterations, 1, device = DEVICE)
 
-        self.eps_v_history = torch.zeros(*self.y.shape, device = DEVICE)
-        self.eps_x_history = torch.zeros(*self.x.shape, device = DEVICE)
-        self.eps_eta_history = torch.zeros(*self.u.shape, device = DEVICE)
+        self.eps_v_history = torch.zeros(*self.y_history.shape, device = DEVICE)
+        self.eps_x_history = torch.zeros(*self.x_history.shape, device = DEVICE)
+        self.eps_eta_history = torch.zeros(*self.u_history.shape, device = DEVICE)
         self.eps_theta_history = torch.zeros(self.iterations, *self.theta.shape, device = DEVICE)
         self.eps_gamma_history = torch.zeros(self.iterations, *self.gamma.shape, device = DEVICE)
 
@@ -204,7 +205,7 @@ class layer():
     def f(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.A @ self.x[i,:] + self.B_u @ self.u[i,:] + self.B_a @ self.a[i,:]
+            return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -212,7 +213,7 @@ class layer():
     def g(self, i):
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.F @ self.x[i,:] + self.G @ self.u[i,:]
+            return self.F @ self.x + self.G @ self.u
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -234,9 +235,9 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        self.eps_v = self.y[i,:] - self.g(i)
-        self.eps_x = Diff(self.x[i,:], self.n, self.e_sim+1) - self.f(i)
-        self.eps_eta = self.u[i,:] - self.eta_u[i,:]
+        self.eps_v = self.y - self.g(i)
+        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(i)
+        self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
 
@@ -252,7 +253,7 @@ class layer():
 
     def free_energy(self, i):
         self.prediction_errors(i)
-        
+
         return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
                             self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
                             ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
@@ -265,8 +266,8 @@ class layer():
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
         self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x[i+1,:] = self.x[i,:] + self.dt * self.dx
-        self.y[i,:] = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.x = self.x + self.dt * self.dx
+        self.y = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
         ### from spm_ADEM_diff
@@ -293,11 +294,11 @@ class layer():
         self.y.requires_grad = True
     
     def saveHistoryVariables(self, i):                                                              # TODO: remove
-        self.y_history = self.y
-        self.x_history = self.x
-        self.u_history = self.u
-        self.a_history = self.a
-        self.eta_u_history = self.eta_u
+        self.y_history[i,:] = self.y
+        self.x_history[i,:] = self.x
+        self.u_history[i,:] = self.u
+        self.a_history[i,:] = self.a
+        self.eta_u_history[i,:] = self.eta_u
 
     def saveHistoryPredictionErrors(self, i):
         self.eps_v_history[i, :] = self.eps_v
