@@ -65,8 +65,7 @@ class layer():
 
         # create variables
         self.y = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)
-        # self.x = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # states
+        self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)      # states
         self.u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
         self.a = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
         if len(eta_u) == 0:
@@ -117,10 +116,6 @@ class layer():
 
         ## dimensions checks ##                                     # TODO: put this earlier, interrupt before padding?
         self.runChecks()
-
-        # initialise variables
-        # with torch.no_grad():
-        #     self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1))
 
 
 
@@ -265,10 +260,10 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f(i)# + self.C @ self.w.noise[i,:].unsqueeze(1)
-        # print(self.dx)
-        # print(self.a)
+        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
         self.x = self.x + self.dt * self.dx
+        for j in range(self.e_sim+1):                                                       # FIXME: In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
+            self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 

@@ -77,7 +77,7 @@ sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [0., 0., 1.], [0., 0., 0.]], device=DEVICE)
+dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
