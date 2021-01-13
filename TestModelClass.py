@@ -15,7 +15,7 @@ if torch.cuda.is_available():
 else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
-dt = .01
+dt = .02
 T = 20
 iterations = int(T/dt)
 
@@ -94,7 +94,7 @@ for i in range(1,iterations-1):
     GM.setObservations(GP.y)
 
     # calculate loss
-    F = GM.free_energy(i)
+    F = GM.free_energy(GM.x, GM.u, i)
 
     # Use autograd to compute the backward pass
     F.backward()
@@ -104,15 +104,26 @@ for i in range(1,iterations-1):
     dFdx = GM.x.grad
     dFdu = GM.u.grad
     dFda = GM.dyda @ dFdy
+
+    inputs = (GM.x, GM.u)
+    
+    H = torch.autograd.functional.hessian(lambda x, v: GM.free_energy(x, v, i=i), inputs)
+    # print(H[0][0].shape)
+    H_x = H[0][0].squeeze(1).squeeze(2)
+    H_u = H[1][1].squeeze(1).squeeze(2)
+
     with torch.no_grad():
         # integrate using Euler-Maruyama
-        GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
-        GM.v = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
+        # GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
+        # GM.u = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
         GP.a = GP.a + dt * (- dFda)
 
         # integrate using Local-linearisation
-        # inputs = torch.empty(1, requires_grad=True)
-        # H = torch.autograd.functional.hessian(GM.free_energy(i), inputs)
+        dx = (torch.matrix_exp(dt * H_x) - torch.eye(GM.sim)) @ H_x.pinverse() @ (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
+        du = (torch.matrix_exp(dt * H_u) - torch.eye(GM.sim)) @ H_u.pinverse() @ (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
+
+        GM.x = GM.x + dt * dx
+        GM.u = GM.u + dt * du
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None
@@ -120,7 +131,7 @@ for i in range(1,iterations-1):
         GM.u.grad = None
 
         GM.x.requires_grad = True                                               # FIXME: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
-        GM.v.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
+        GM.u.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
 
 plt.figure()
 plt.plot(GM.y_history[:-1,0].detach(), GM.y_history[:-1,1].detach(), 'b')

@@ -246,7 +246,10 @@ class layer():
 
         self.saveHistoryPredictionErrors(i)
 
-    def free_energy(self, i):
+    def free_energy(self, x, v, i):
+        self.x = x
+        self.v = v
+
         self.prediction_errors(i)
 
         return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
@@ -262,6 +265,7 @@ class layer():
 
         self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
         self.x = self.x + self.dt * self.dx
+        
         for j in range(self.e_sim+1):                                                       # FIXME: In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
             self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
