@@ -5,6 +5,7 @@ import torch
 from functions import kronecker, symsqrt, Diff
 from smoothNoise import noise
 from globalVariables import DEVICE, _small
+from integrationSchemes import dx_ll
 
 # class odeSolver():
 #     def __init__(self):
@@ -274,12 +275,9 @@ class layer():
         elif method == 1:
             inputs = (self.x, self.u)
             self.J = torch.autograd.functional.jacobian(lambda x, v: self.f(x, v), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-            # print(self.J)
             self.J_x = self.J[0].squeeze()                                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-            # self.J_u = self.J[1][1].squeeze()                                                 # time, might want to switch backward --> grad and than take jacobian of grad
-            # print(self.J_x)
 
-            self.dx = (torch.matrix_exp(self.dt * self.J_x) - torch.eye(self.sim)) @ self.J_x.pinverse() @ (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1))
+            self.dx = dx_ll(self.dt, self.sim, self.J_x, (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)))
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
 
             self.x = self.x + self.dt * self.dx

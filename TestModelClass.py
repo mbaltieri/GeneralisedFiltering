@@ -1,6 +1,7 @@
-from layer import *
 import functions
 import matplotlib.pyplot as plt
+from layer import *
+from integrationSchemes import dx_ll
 
 # torch.autograd.set_detect_anomaly(True)
 torch.set_printoptions(precision=10)
@@ -68,17 +69,17 @@ sigma_z_GM = torch.exp(sigma_z_log_GM)
 Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
             [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
 
-sigma_w_log_GM = torch.tensor([-1.], device=DEVICE)                                 # log-precision
+sigma_w_log_GM = torch.tensor([-4.], device=DEVICE)                                 # log-precision
 sigma_w_GM = torch.exp(sigma_w_log_GM)
 Sigma_w_GM = torch.tensor([[sigma_w_GM, 0., 0.], [0., sigma_w_GM, 0.], 
             [0., 0, sigma_w_GM]], device=DEVICE)
 
-sigma_v_log_GM = torch.tensor([-3.], device=DEVICE)                                 # log-precision
+sigma_v_log_GM = torch.tensor([-8.], device=DEVICE)                                 # log-precision
 sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([10.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
+dyda = torch.exp(torch.tensor([-8.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
@@ -117,17 +118,12 @@ for i in range(1,iterations-1):
         # integrate using Euler-Maruyama
         # GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
         # GM.u = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
-        # GP.a = GP.a + dt * (- dFda)
-
-        # print(dFdx)
-        # print(dFdu)
+        GP.a = GP.a + dt * (- dFda)
 
         # integrate using Local-linearisation
-        dx = (torch.matrix_exp(dt * -J_x) - torch.eye(GM.sim)) @ - J_x.pinverse() @ (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)                 # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
-        du = (torch.matrix_exp(dt * -J_u) - torch.eye(GM.sim)) @ - J_u.pinverse() @ (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
-
-        # print(dx)
-        # print(du)
+        dx = dx_ll(dt, GM.sim, -J_x, (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
+        du = dx_ll(dt, GM.sim, -J_u, (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
+        # da = dx_ll(dt, GM.sim, , - dFda)
 
         GM.x = GM.x + dt * dx
         GM.u = GM.u + dt * du
@@ -137,6 +133,7 @@ for i in range(1,iterations-1):
         GM.x.grad = None
         GM.u.grad = None
 
+        GM.y.requires_grad = True
         GM.x.requires_grad = True                                               # FIXME: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
         GM.u.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
     GP.saveHistoryVariables(i)
