@@ -5,7 +5,7 @@ from integrationSchemes import dx_ll
 
 # torch.autograd.set_detect_anomaly(True)
 torch.set_printoptions(precision=10)
-
+# print(torch.__version__)
 
 print("Device in use:", DEVICE)
 
@@ -79,7 +79,7 @@ sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([-8.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
+dyda = torch.exp(torch.tensor([8.]))*torch.tensor([[0., 0., 0.], [1., 1., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
@@ -93,7 +93,7 @@ for i in range(1,iterations-1):
     GM.setObservations(GP.y)
 
     # calculate loss
-    F = GM.free_energy(GM.x, GM.u, i)
+    F = GM.free_energy(GM.y, GM.x, GM.u, i)
 
     # Use autograd to compute the backward pass
     F.backward()
@@ -104,11 +104,16 @@ for i in range(1,iterations-1):
     dFdu = GM.u.grad
     dFda = GM.dyda @ dFdy
 
-    inputs = (GM.x, GM.u)
+    inputs = (GM.y, GM.x, GM.u)
     
-    J = torch.autograd.functional.hessian(lambda x, v: GM.free_energy(x, v, i=i), inputs)                         # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-    J_x = J[0][0].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-    J_u = J[1][1].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
+    J = torch.autograd.functional.hessian(lambda y, x, v: GM.free_energy(y, x, v, i=i), inputs)                         # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+    J_y = J[0][0].squeeze()
+    J_x = J[1][1].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+    J_u = J[2][2].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
+
+    J_a = dyda.t() @ J_y @ dyda
+    J_a = J_y @ dyda**2
+    # print(J_u)
 
     # print('J_x: ', J_x)
     # print('J_u: ', J_u)
@@ -118,22 +123,26 @@ for i in range(1,iterations-1):
         # integrate using Euler-Maruyama
         # GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
         # GM.u = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
-        GP.a = GP.a + dt * (- dFda)
+        # GP.a = GP.a + dt * (- dFda)
 
         # integrate using Local-linearisation
         dx = dx_ll(dt, GM.sim, -J_x, (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
         du = dx_ll(dt, GM.sim, -J_u, (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
-        # da = dx_ll(dt, GM.sim, , - dFda)
+        da = dx_ll(dt, GM.sim, -J_a, - dFda)
 
         GM.x = GM.x + dt * dx
         GM.u = GM.u + dt * du
+        GP.a = 10000*torch.sin(torch.tensor([0, 2*math.pi*i*10000000000000000000000, 0])).unsqueeze(1)#GP.a + dt * da
+
+        print(100*torch.sin(torch.tensor([0, 2*math.pi*i, 0])).unsqueeze(1))
+        print(GP.a)
     
         # Manually zero the gradients after updating weights
         GM.y.grad = None
         GM.x.grad = None
         GM.u.grad = None
 
-        GM.y.requires_grad = True
+        # GM.y.requires_grad = True
         GM.x.requires_grad = True                                               # FIXME: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
         GM.u.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
     GP.saveHistoryVariables(i)

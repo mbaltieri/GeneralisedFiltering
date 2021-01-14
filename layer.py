@@ -204,6 +204,7 @@ class layer():
 
         # TODO: generalise this to include nonlinear treatments
         try:
+            print(self.a)
             return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
         except RuntimeError:
             print("Dimensions don't match!")
@@ -250,8 +251,9 @@ class layer():
 
         self.saveHistoryPredictionErrors(i)
 
-    def free_energy(self, x, u, i):
-        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
+    def free_energy(self, y, x, u, i):
+        self.y = y
+        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian' in torch.autograd.functional
         self.u = u
 
         self.prediction_errors(i)
@@ -274,10 +276,13 @@ class layer():
             self.x = self.x + self.dt * self.dx
         elif method == 1:
             inputs = (self.x, self.u)
+            # print(inputs)
             self.J = torch.autograd.functional.jacobian(lambda x, v: self.f(x, v), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
             self.J_x = self.J[0].squeeze()                                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            print(self.J_x)
+            print(self.f(self.x, self.u))
 
-            self.dx = dx_ll(self.dt, self.sim, self.J_x, (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)))
+            self.dx = dx_ll(self.dt, self.sim, self.J_x, (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
 
             self.x = self.x + self.dt * self.dx
