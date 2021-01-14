@@ -197,7 +197,10 @@ class layer():
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
 
-    def f(self, i):
+    def f(self, x, u):
+        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
+        self.u = u
+
         # TODO: generalise this to include nonlinear treatments
         try:
             return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
@@ -205,7 +208,7 @@ class layer():
             print("Dimensions don't match!")
             return
     
-    def g(self, i):
+    def g(self):
         # TODO: generalise this to include nonlinear treatments
         try:
             return self.F @ self.x + self.G @ self.u
@@ -230,8 +233,8 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        self.eps_v = self.y - self.g(i)
-        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(i)
+        self.eps_v = self.y - self.g()
+        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(self.x, self.u)
         self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
@@ -246,9 +249,9 @@ class layer():
 
         self.saveHistoryPredictionErrors(i)
 
-    def free_energy(self, x, v, i):
-        self.x = x
-        self.v = v
+    def free_energy(self, x, u, i):
+        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
+        self.u = u
 
         self.prediction_errors(i)
 
@@ -257,18 +260,37 @@ class layer():
                             ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
                             torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())           # TODO: add more terms due to the variational Gaussian approximation?
 
-    def step(self, i):
-        # FIXME: Choose and properly implement a numerical solver (or multiple ones?) Euler-Maruyama, Local linearisation, Milner, etc.
+    def step(self, i, method=1):
+        # methods:
+        # 0: Euler-Maruyama
+        # 1: Local linearisation (Ozaki '92)
 
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.dx = self.f(i) + self.C @ self.w.noise[i,:].unsqueeze(1)
-        self.x = self.x + self.dt * self.dx
+        if method == 0:
+            self.dx = self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)
+            self.x = self.x + self.dt * self.dx
+        elif method == 1:
+            inputs = (self.x, self.u)
+            self.J = torch.autograd.functional.jacobian(lambda x, v: self.f(x, v), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+            # print(self.J)
+            self.J_x = self.J[0].squeeze()                                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            # self.J_u = self.J[1][1].squeeze()                                                 # time, might want to switch backward --> grad and than take jacobian of grad
+            # print(self.J_x)
+
+            self.dx = (torch.matrix_exp(self.dt * self.J_x) - torch.eye(self.sim)) @ self.J_x.pinverse() @ (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1))
+            # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
+
+            self.x = self.x + self.dt * self.dx
+            # GM.u = GM.u + dt * du
+        else:
+            print('Method not implemented. Please check and try a different method.')
+            quit()
         
-        for j in range(self.e_sim+1):                                                       # FIXME: In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
+        for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
             self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
-        self.y = self.g(i) + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
 
 
         ### from spm_ADEM_diff
@@ -280,15 +302,6 @@ class layer():
         # end
         # u.v{n}  = dg.dv*u.v{n} + dg.dx*u.x{n} + dg.da*u.a{n} + u.z{n};
 
-        # TODO: check how to implement numerical methods for differential equations with pytorch
-        # (remember that we need a dt and, consequently, a way to handle non-discrete steps)
-        # TODO: define block matrix (multivariate case in arbitrary embedding orders) 
-        # for updates of SDEs similar to what can be found in 'Generalised filtering'
-        # def forward(self, method=0):
-        #     return
-            # methods:
-            # 0: Local linearisation
-            # 1: Euler-Maruyama
     
     def setObservations(self, y):                                                                   # TODO: check if there's a more elegant way of doing this
         self.y = y.detach()

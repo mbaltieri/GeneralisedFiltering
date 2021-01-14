@@ -15,8 +15,8 @@ if torch.cuda.is_available():
 else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
-dt = .02
-T = 20
+dt = 1
+T = 100
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -39,6 +39,7 @@ e_h = 0                             # embedding dimension hyperparameters
 ## generative process
 
 A = torch.tensor([[0., 1., 0], [0., 0., 0.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
+# A = torch.tensor([[0., 1., 0.], [-2, -2, 0.], [0., 0., 0.]], device=DEVICE)
 B_a = torch.tensor([[0., 0., 0.], [0., 1., 0.], [0., 0., 0.]], device=DEVICE)               # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
@@ -85,9 +86,6 @@ GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a
 GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
 
 for i in range(1,iterations-1):
-    GP.saveHistoryVariables(i)
-    GM.saveHistoryVariables(i)
-
     print(i)
 
     GP.step(i)
@@ -107,20 +105,29 @@ for i in range(1,iterations-1):
 
     inputs = (GM.x, GM.u)
     
-    H = torch.autograd.functional.hessian(lambda x, v: GM.free_energy(x, v, i=i), inputs)
-    # print(H[0][0].shape)
-    H_x = H[0][0].squeeze(1).squeeze(2)
-    H_u = H[1][1].squeeze(1).squeeze(2)
+    J = torch.autograd.functional.hessian(lambda x, v: GM.free_energy(x, v, i=i), inputs)                         # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+    J_x = J[0][0].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+    J_u = J[1][1].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
+
+    # print('J_x: ', J_x)
+    # print('J_u: ', J_u)
+    # print('expm(J_x): ', torch.matrix_exp(dt * -J_x))
 
     with torch.no_grad():
         # integrate using Euler-Maruyama
         # GM.x = GM.x + dt * (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
         # GM.u = GM.u + dt * (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
-        GP.a = GP.a + dt * (- dFda)
+        # GP.a = GP.a + dt * (- dFda)
+
+        # print(dFdx)
+        # print(dFdu)
 
         # integrate using Local-linearisation
-        dx = (torch.matrix_exp(dt * H_x) - torch.eye(GM.sim)) @ H_x.pinverse() @ (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)
-        du = (torch.matrix_exp(dt * H_u) - torch.eye(GM.sim)) @ H_u.pinverse() @ (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
+        dx = (torch.matrix_exp(dt * -J_x) - torch.eye(GM.sim)) @ - J_x.pinverse() @ (Diff(GM.x, GM.sim, GM.e_sim+1) - dFdx)                 # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
+        du = (torch.matrix_exp(dt * -J_u) - torch.eye(GM.sim)) @ - J_u.pinverse() @ (Diff(GM.u, GM.sim, GM.e_sim+1) - dFdu)
+
+        # print(dx)
+        # print(du)
 
         GM.x = GM.x + dt * dx
         GM.u = GM.u + dt * du
@@ -132,6 +139,8 @@ for i in range(1,iterations-1):
 
         GM.x.requires_grad = True                                               # FIXME: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
         GM.u.requires_grad = True                                               # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
+    GP.saveHistoryVariables(i)
+    GM.saveHistoryVariables(i)
 
 plt.figure()
 plt.plot(GM.y_history[:-1,0].detach(), GM.y_history[:-1,1].detach(), 'b')
