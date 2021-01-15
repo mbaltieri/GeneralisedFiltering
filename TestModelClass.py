@@ -17,7 +17,7 @@ else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
 dt = 1
-T = 100
+T = 10
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -86,7 +86,7 @@ eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                         
 GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
 GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
 
-for i in range(1,iterations-1):
+for i in range(0,iterations-1):
     print(i)
 
     GP.step(i)
@@ -132,7 +132,7 @@ for i in range(1,iterations-1):
 
         GM.x = GM.x + dt * dx
         GM.u = GM.u + dt * du
-        GP.a = 10000*torch.sin(torch.tensor([0, 2*math.pi*i*10000000000000000000000, 0])).unsqueeze(1)#GP.a + dt * da
+        # GP.a = 1*torch.sin(torch.tensor([0, 2*math.pi*i, 0])).unsqueeze(1)#GP.a + dt * da
 
         print(100*torch.sin(torch.tensor([0, 2*math.pi*i, 0])).unsqueeze(1))
         print(GP.a)

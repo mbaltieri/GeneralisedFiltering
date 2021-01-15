@@ -198,22 +198,35 @@ class layer():
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
 
-    def f(self, x, u):
+    def f(self, x, u, a):
         self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
         self.u = u
+        self.a = a
 
         # TODO: generalise this to include nonlinear treatments
         try:
-            print(self.a)
             return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
         except RuntimeError:
             print("Dimensions don't match!")
             return
     
-    def g(self):
+    def g(self, x, u, a):
+        print(self.x)
+        print(x)
+        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
+        print(self.x)
+        print(self.u)
+        print(u)
+        self.u = u
+        print(self.u)
+        print(self.a)
+        print(a)
+        self.a = a
+        print(self.a)
+
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.F @ self.x + self.G @ self.u
+            return self.F @ self.x# + self.G @ self.u
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -236,7 +249,7 @@ class layer():
 
     def prediction_errors(self, i):
         self.eps_v = self.y - self.g()
-        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(self.x, self.u)
+        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(self.x, self.u, self.a)
         self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
@@ -271,18 +284,22 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
+        self.updateGeneralisedCoordinates(i)
+
         if method == 0:
-            self.dx = self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)
+            self.dx = self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)
             self.x = self.x + self.dt * self.dx
         elif method == 1:
-            inputs = (self.x, self.u)
+            inputs = (self.x, self.u, self.a)
             # print(inputs)
-            self.J = torch.autograd.functional.jacobian(lambda x, v: self.f(x, v), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+            self.J = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
             self.J_x = self.J[0].squeeze()                                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-            print(self.J_x)
-            print(self.f(self.x, self.u))
+            self.J_a = self.J[2].squeeze()
+            # print(self.J_x)
+            # print(self.J_a)
+            print(self.f(self.x, self.u, self.a))
 
-            self.dx = dx_ll(self.dt, self.sim, self.J_x, (self.f(self.x, self.u) + self.C @ self.w.noise[i,:].unsqueeze(1)))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
+            self.dx = dx_ll(self.dt, self.sim, self.J_x + self.J_a, (self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
 
             self.x = self.x + self.dt * self.dx
@@ -291,11 +308,11 @@ class layer():
             print('Method not implemented. Please check and try a different method.')
             quit()
         
-        for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
-            self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
-        self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
-
-
+        # for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
+        #     self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
+        # self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
+    
+    def updateGeneralisedCoordinates(self, i):
         ### from spm_ADEM_diff
         # u.v{1}  = spm_vec(vi);
         # u.x{2}  = spm_vec(fi) + u.w{1};
@@ -305,10 +322,28 @@ class layer():
         # end
         # u.v{n}  = dg.dv*u.v{n} + dg.dx*u.x{n} + dg.da*u.a{n} + u.z{n};
 
+        inputs = (self.x, self.u, self.a)
+        dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
+        df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
+
+        print(self.x[1:self.sim])
+        print(self.f(self.x, self.u, self.a)[:self.sim-1])
+        print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1])
+
+        self.x[1:self.sim] = self.f(self.x, self.u, self.a)[:self.sim-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1]              # FIXME: decide where to put noise w, 1) inside f (remove last part) or 2) outside f (remove w from list of parameters of f)
+        aa = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
+        self.y[:self.sim] = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
+        for j in range(1,self.e_sim-1):
+            self.x[j*self.sim+1:(j+1)*self.sim] = df[0] * self.x[j*self.sim:(j+1)*self.sim-1] + df[1] * self.u[j*self.sim:(j+1)*self.sim-1] + df[2] * self.a[j*self.sim:(j+1)*self.sim-1] + self.C @ self.w.noise[i,j*self.sim:(j+1)*self.sim-1].unsqueeze(1)
+            self.y[j*self.sim:(j+1)*self.sim] = dg[0] * self.y[j*self.sim:(j+1)*self.sim] + dg[1] * self.x[j*self.sim:(j+1)*self.sim] + dg[2] * self.u[j*self.sim:(j+1)*self.sim] + self.H @ self.z.noise[i,j*self.sim:(j+1)*self.sim].unsqueeze(1)
+        self.y[self.e_sim*self.sim:] = dg[0] * self.y[self.e_sim*self.sim:] + dg[1] * self.x[self.e_sim*self.sim:] + dg[2] * self.u[self.e_sim*self.sim:] + self.H @ self.z.noise[i,self.e_sim*self.sim:].unsqueeze(1)
+
+
     
     def setObservations(self, y):                                                                   # TODO: check if there's a more elegant way of doing this
-        self.y = y.detach()
-        self.y.requires_grad = True
+        self.y = y
+        # .detach()
+        # self.y.requires_grad = True
     
     def saveHistoryVariables(self, i):                                                              # TODO: remove
         self.y_history[i,:] = self.y
