@@ -237,6 +237,9 @@ class layer():
             uR = self.u.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
             aR = self.a.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
 
+            # Alternative (easier to debug?) below:
+            # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
+
             f = (self.A @ xR + self.B_u @ uR + self.B_a @ aR)
 
             fPadded = torch.nn.functional.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
@@ -327,10 +330,13 @@ class layer():
             # print(self.J_x)
             # print(self.J_a)
             # print(self.f(self.x, self.u, self.a))
-
-            self.dx = dx_ll(self.dt, self.J_x + self.J_a, self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
+            # print(self.x)
+            self.dx = dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
+            # print(Diff(self.x, self.sim+1, self.e_sim+1))
+            # print(self.J_x + self.J_a)
+            # print(self.x)
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
-            self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1) = self.dx.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1)
+            # self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1) = self.dx.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1)
 
             # print(self.dx)
             self.x = self.x + self.dt * self.dx
@@ -371,24 +377,26 @@ class layer():
         # print(self.f(self.x, self.u, self.a)[:self.sim])
         # print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim])
 
-        # print(self.x)
+        print(self.x)
+        print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1].shape)
+        print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1])
 
-        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
+        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
         self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
 
         # print(self.x)
 
-        for j in range(1,self.e_sim):
+        for j in range(1,self.e_sim+1):
             # a = self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)]
             # print(a)
             # aa = self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             # print(aa)
             # aaa = dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             # print(dfdx)
-            # print(aaa)
-
-            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            # print(self.y)
+            print(self.x)
+            print(self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)].shape)
+            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            print(self.x)
             self.y[j*(self.sim+1):(j+1)*(self.sim+1)] = self.dgdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)]
             # print(self.y)
         # print(self.y[(self.e_sim)*(self.sim+1):])
