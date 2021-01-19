@@ -28,20 +28,18 @@ l = 3                               # number of layers
 # p = 6                               # parameters dimension
 # h = 3                               # hyperparameters dimension
 
-e_n = 0                             # embedding dimension hidden states
+e_n = 4                             # embedding dimension hidden states
 e_r = 0                             # embedding dimension inputs
 e_p = 0                             # embedding dimension parameters
 e_h = 0                             # embedding dimension hyperparameters
-
-
 
 ### Test double integrator
 
 ## generative process
 
-A = torch.tensor([[0., 1., 0], [0., 0., 0.], [0., 0., 0.]], device=DEVICE)                 # state transition matrix
+A = torch.tensor([[0., 1.], [0., 0.]], device=DEVICE)                 # state transition matrix
 # A = torch.tensor([[0., 1., 0.], [-2, -2, 0.], [0., 0., 0.]], device=DEVICE)
-B_a = torch.tensor([[0., 0., 0.], [0., 1., 0.], [0., 0., 0.]], device=DEVICE)               # input matrix (dynamics)
+B_a = torch.tensor([[0., 0.], [0., 1.]], device=DEVICE)               # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
 sigma_z_log = torch.tensor([-3.], device=DEVICE)                                     # log-precision
@@ -51,8 +49,7 @@ Sigma_z = torch.tensor([[sigma_z, 0., 0.], [0., sigma_z, 0.],
 
 sigma_w_log = torch.tensor([-3.], device=DEVICE)                                     # log-precision
 sigma_w = torch.exp(sigma_w_log)
-Sigma_w = torch.tensor([[0., 0., 0.], [0., sigma_w, 0.], 
-            [0., 0., 0.]], device=DEVICE)
+Sigma_w = torch.tensor([[0., 0.], [0., sigma_w]], device=DEVICE)
 
 
 ## generative model

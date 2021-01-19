@@ -28,7 +28,7 @@ class layer():
         self.e_h = e_h                                                          # embedding dimension hyperparameters
 
         self.m = len(F)                                                         # observations dimension
-        self.n = len(A)                                                         # hidden states dimension
+        self.n = len(A)                                                       # hidden states dimension (n+1 variables for n equations)
 
         self.A = A
         self.B_u = B_u
@@ -53,9 +53,6 @@ class layer():
             self.E = torch.tensor([[_small]], device=DEVICE)
 
 
-        # add padding for dimensionality
-        self.addPadding()
-
         # create block matrices considering higher embedding orders
         self.A = kronecker(torch.eye(self.e_sim+1), self.A)                          # state transition matrix
         self.B_u = kronecker(torch.eye(self.e_sim+1), self.B_u)                      # input matrix (external dynamics)
@@ -65,12 +62,12 @@ class layer():
         self.dyda = kronecker(torch.ones(self.e_sim+1,1), self.dyda)                 # (direct) influence of actions on observations  
 
         # create variables
-        self.y = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # observations
-        self.x = torch.normal(0, 10, size=(self.sim*(self.e_sim+1), 1), requires_grad = True, device = DEVICE)      # states
-        self.u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # inputs (GM) / external forces (GP)
-        self.a = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)             # self-produced actions (GP)
+        self.y = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # observations
+        self.x = torch.normal(0, 10, size=((self.sim+1), (self.e_sim+1)), requires_grad = True, device = DEVICE)          # states
+        self.u = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # inputs (GM) / external forces (GP)
+        self.a = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # self-produced actions (GP)
         if len(eta_u) == 0:
-            self.eta_u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)     # prior on inputs
+            self.eta_u = torch.zeros((self.sim+1)*(self.e_sim), 1, requires_grad = True, device = DEVICE)     # prior on inputs
         else:                                                                                               # if there is a prior, assign it
             try:
                 # self.eta_u = torch.zeros(self.sim*(self.e_sim+1), 1, requires_grad = True, device = DEVICE)        # FIXME: make sure to update eta_u in step too, otherwise priors won't get propagated
@@ -115,6 +112,9 @@ class layer():
         ## history ##
         self.history()
 
+        # add padding for number of embedding orders                # FIXME: This needs to deal with the new format of our variables, now in matrices to be flatted/unflattend as needed
+        self.addPadding()
+
         ## dimensions checks ##                                     # TODO: put this earlier, interrupt before padding?
         self.runChecks()
 
@@ -145,6 +145,15 @@ class layer():
 
             print('Not fully implemented, quitting.')
             quit()
+
+        # self.A = torch.nn.functional.pad(self.A, (0, 0, 0, 1))            # the matrix A must have an extra order since we are writing down n+1 variables in the vector x
+        # self.A = torch.nn.functional.pad(self.A, (0, 1, 0, 0))
+
+        # self.B_u = torch.nn.functional.pad(self.B_u, (0, 0, 0, 1))        # same
+        # self.B_u = torch.nn.functional.pad(self.B_u, (0, 1, 0, 0))
+
+        # self.B_a = torch.nn.functional.pad(self.B_a, (0, 0, 0, 1))        # same
+        # self.B_a = torch.nn.functional.pad(self.B_a, (0, 1, 0, 0))
 
     def history(self):
         # TODO: this should be used with parsimony to avoid the RAM blowing up for big models
@@ -205,28 +214,29 @@ class layer():
 
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.A @ self.x + self.B_u @ self.u + self.B_a @ self.a
+            # print(self.x)
+            # aa = self.x[:-1, :].t().flatten().unsqueeze(1)
+            # print(aa)
+            # aa = self.u[:-1, :].t().flatten().unsqueeze(1)
+            # aa = self.a[:-1, :].t().flatten().unsqueeze(1)
+            aa =  (self.A @ self.x[:-1, :].t().flatten().unsqueeze(1) + self.B_u @ self.u[:-1, :].t().flatten().unsqueeze(1) + self.B_a @ self.a[:-1, :].t().flatten().unsqueeze(1)).squeeze().unflatten(0, (self.e_sim+1, self.sim)).t()                               # the extra order exluded in self.x.view(self.e_sim,self.sim+1)[:,:-1] was simply added to ensure consistency for n+1 embeddings given only n equations
+            # print(aa)
+            # # print(aa.t().shape)
+            # print(aa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t())
+            return aa
         except RuntimeError:
             print("Dimensions don't match!")
             return
     
     def g(self, x, u, a):
-        print(self.x)
-        print(x)
         self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
-        print(self.x)
-        print(self.u)
-        print(u)
         self.u = u
-        print(self.u)
-        print(self.a)
-        print(a)
         self.a = a
-        print(self.a)
 
         # TODO: generalise this to include nonlinear treatments
         try:
-            return self.F @ self.x# + self.G @ self.u
+            aa = self.x.flatten().unsqueeze(1)
+            return self.F @ self.x.flatten().unsqueeze(1)# + self.G @ self.u
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -311,7 +321,7 @@ class layer():
         # for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
         #     self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         # self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
-    
+
     def updateGeneralisedCoordinates(self, i):
         ### from spm_ADEM_diff
         # u.v{1}  = spm_vec(vi);
@@ -326,16 +336,31 @@ class layer():
         dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
         df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
 
-        print(self.x[1:self.sim])
-        print(self.f(self.x, self.u, self.a)[:self.sim-1])
+        dgdx = dg[0].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        dgdu = dg[1].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        dgda = dg[2].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        dfdx = df[0].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        dfdu = df[1].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        dfda = df[2].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+
+        print(self.x)
+        print(self.f(self.x, self.u, self.a))
+
+
+        print(self.x[:,0])
+        print(self.f(self.x, self.u, self.a)[:,0])
         print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1])
 
-        self.x[1:self.sim] = self.f(self.x, self.u, self.a)[:self.sim-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1]              # FIXME: decide where to put noise w, 1) inside f (remove last part) or 2) outside f (remove w from list of parameters of f)
-        aa = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
-        self.y[:self.sim] = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
-        for j in range(1,self.e_sim-1):
-            self.x[j*self.sim+1:(j+1)*self.sim] = df[0] * self.x[j*self.sim:(j+1)*self.sim-1] + df[1] * self.u[j*self.sim:(j+1)*self.sim-1] + df[2] * self.a[j*self.sim:(j+1)*self.sim-1] + self.C @ self.w.noise[i,j*self.sim:(j+1)*self.sim-1].unsqueeze(1)
-            self.y[j*self.sim:(j+1)*self.sim] = dg[0] * self.y[j*self.sim:(j+1)*self.sim] + dg[1] * self.x[j*self.sim:(j+1)*self.sim] + dg[2] * self.u[j*self.sim:(j+1)*self.sim] + self.H @ self.z.noise[i,j*self.sim:(j+1)*self.sim].unsqueeze(1)
+        self.x[1:self.sim+1] = self.f(self.x, self.u, self.a)[:self.sim] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1]              # FIXME: decide where to put noise w, 1) inside f (remove last part) or 2) outside f (remove w from list of parameters of f)
+        self.y[0:self.sim] = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]                 # Pytorch doesn't like in-place operations for gradients, so see next line..
+        # y = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
+
+        for j in range(1,self.e_sim+1):
+            aaaa = self.x[j*self.sim-1:(j+1)*self.sim-1] 
+            aaa = dfdx * self.x[j*self.sim:(j+1)*self.sim-1] 
+            # self.x[j*self.sim+1:(j+1)*self.sim] = 
+            # + dfdu * self.u[j*self.sim:(j+1)*self.sim-1] + dfda * self.a[j*self.sim:(j+1)*self.sim-1] + self.C @ self.w.noise[i,j*self.sim:(j+1)*self.sim-1].unsqueeze(1)
+            self.y[j*self.sim:(j+1)*self.sim] = dgdx * self.y[j*self.sim:(j+1)*self.sim] + dgdu * self.x[j*self.sim:(j+1)*self.sim] + dgda * self.u[j*self.sim:(j+1)*self.sim] + self.H @ self.z.noise[i,j*self.sim:(j+1)*self.sim].unsqueeze(1)
         self.y[self.e_sim*self.sim:] = dg[0] * self.y[self.e_sim*self.sim:] + dg[1] * self.x[self.e_sim*self.sim:] + dg[2] * self.u[self.e_sim*self.sim:] + self.H @ self.z.noise[i,self.e_sim*self.sim:].unsqueeze(1)
 
 

@@ -39,8 +39,8 @@ class noise():                                                  # TODO: In the f
 
 
     def spm_DEM_R(self, n, s):
-        # function adapted and simplied from SPM, original description below; this is now in use as it is much faster for higher numbers of generalised coordinates
-        # TODO: include multiple different correlations if necessary, for now only Gaussian
+        # function adapted and simplied from SPM, original description below
+        # TODO: include different correlations if necessary, for now only Gaussian
 
         # function [R,V] = spm_DEM_R(n,s,form)
         # returns the precision of the temporal derivatives of a Gaussian process
@@ -160,9 +160,9 @@ class noise():                                                  # TODO: In the f
         y = torch.zeros(q, n)
         # embed
         for i in range(0,n):
-            y[:,i] = Y[:,k-1] @ E[i,:].t()          # TODO: Use torch.block_diag, i.e., noise = [[noise, zeros], [zeros, noise1gencoord]] ... or not? Everything in one column?
+            y[:,i] = Y[:,k-1] @ E[i,:].t()
         
-        z = y.t().flatten().t()                     # TODO: Look for more elegant solution (all noise, different variables and embedding orders in one column)
+        z = y.t().flatten().t()                     # TODO: Look for more elegant solution (all noise, different variables and embedding orders in one column [y1 y2 ... yn, y'1 y'2 ... y'n, y''1 y''2 ... y''n]^T)
 
         return z
 
