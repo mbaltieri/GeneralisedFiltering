@@ -59,13 +59,13 @@ class layer():
         self.B_a = kronecker(torch.eye(self.e_sim+1), self.B_a)                      # input matrix (self-generated dynamics)
         self.F = kronecker(torch.eye(self.e_sim+1), self.F)                          # observation matrix
         self.G = kronecker(torch.eye(self.e_sim+1), self.G)                          # input matrix (observations)
-        self.dyda = kronecker(torch.ones(self.e_sim+1,1), self.dyda)                 # (direct) influence of actions on observations  
+        self.dyda = kronecker(torch.eye(self.e_sim+1), self.dyda)                 # (direct) influence of actions on observations  
 
         # create variables
-        self.y = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # observations
-        self.x = torch.normal(0, 10, size=((self.sim+1), (self.e_sim+1)), requires_grad = True, device = DEVICE)          # states
-        self.u = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # inputs (GM) / external forces (GP)
-        self.a = torch.zeros((self.sim+1), (self.e_sim+1), requires_grad = True, device = DEVICE)                         # self-produced actions (GP)
+        self.y = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # observations
+        self.x = torch.normal(0, 10, size=((self.sim+1) * (self.e_sim+1), 1), requires_grad = True, device = DEVICE)          # states
+        self.u = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # inputs (GM) / external forces (GP)
+        self.a = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # self-produced actions (GP)
         if len(eta_u) == 0:
             self.eta_u = torch.zeros((self.sim+1)*(self.e_sim), 1, requires_grad = True, device = DEVICE)     # prior on inputs
         else:                                                                                               # if there is a prior, assign it
@@ -97,9 +97,10 @@ class layer():
 
 
         ## noise ##
+        Sigma_w = torch.nn.functional.pad(Sigma_w, (0, 1, 0, 1))                # padding for matrix computations of augmented states (see function f)
         self.phi = phi                                                          # smoothness of temporal correlations
-        self.z = noise(self.flag, self.T, self.dt, Sigma_z, self.n, self.e_sim, self.phi)
-        self.w = noise(self.flag, self.T, self.dt, Sigma_w, self.n, self.e_sim, self.phi)
+        self.z = noise(self.flag, self.T, self.dt, Sigma_z, self.n+1, self.e_sim, self.phi)
+        self.w = noise(self.flag, self.T, self.dt, Sigma_w, self.n+1, self.e_sim, self.phi)
         self.v = noise(self.flag, self.T, self.dt, Sigma_v, self.n, self.e_sim, self.phi)
 
         self.C = symsqrt(self.w.Sigma)
@@ -200,9 +201,9 @@ class layer():
 
     def runChecks(self):
         ### Run some simple checks on tensors dimensions
-        if self.A.size(0) != self.C.size(0):
-            print('State transition matrix and process noise matrix sizes don\'t match. Please check and try again.')
-            quit()
+        # if self.A.size(0) != self.C.size(0):
+        #     print('State transition matrix and process noise matrix sizes don\'t match. Please check and try again.')
+        #     quit()
         if self.F.size(0) != self.H.size(0):
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
@@ -214,16 +215,35 @@ class layer():
 
         # TODO: generalise this to include nonlinear treatments
         try:
-            # print(self.x)
-            # aa = self.x[:-1, :].t().flatten().unsqueeze(1)
+            # aa = self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:]
+            # # print(self.x)
+            # # aa = self.x[:-1, :].t().flatten().unsqueeze(1)
+            # print(aa)
+            # # aa = self.x.squeeze().unflatten(0, (self.sim+1, self.e_sim+1))
+            # # print(aa)
+            # aa = aa.t().flatten().unsqueeze(1)
             # print(aa)
             # aa = self.u[:-1, :].t().flatten().unsqueeze(1)
             # aa = self.a[:-1, :].t().flatten().unsqueeze(1)
-            aa =  (self.A @ self.x[:-1, :].t().flatten().unsqueeze(1) + self.B_u @ self.u[:-1, :].t().flatten().unsqueeze(1) + self.B_a @ self.a[:-1, :].t().flatten().unsqueeze(1)).squeeze().unflatten(0, (self.e_sim+1, self.sim)).t()                               # the extra order exluded in self.x.view(self.e_sim,self.sim+1)[:,:-1] was simply added to ensure consistency for n+1 embeddings given only n equations
-            # print(aa)
+            # aa =  (self.A @ self.x[:-1, :].t().flatten().unsqueeze(1) + self.B_u @ self.u[:-1, :].t().flatten().unsqueeze(1) + self.B_a @ self.a[:-1, :].t().flatten().unsqueeze(1)).squeeze().unflatten(0, (self.e_sim+1, self.sim)).t()                               # the extra order exluded in self.x.view(self.e_sim,self.sim+1)[:,:-1] was simply added to ensure consistency for n+1 embeddings given only n equations
+            # bb = self.A @ self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            # print(bb)
+            # cc = self.x.flatten()
+            # print(cc)
             # # print(aa.t().shape)
             # print(aa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t())
-            return aa
+
+            xR = self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            uR = self.u.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            aR = self.a.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+
+            f = (self.A @ xR + self.B_u @ uR + self.B_a @ aR)
+
+            fPadded = torch.nn.functional.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
+
+            result = fPadded.t().flatten().unsqueeze(1)
+
+            return result
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -235,8 +255,7 @@ class layer():
 
         # TODO: generalise this to include nonlinear treatments
         try:
-            aa = self.x.flatten().unsqueeze(1)
-            return self.F @ self.x.flatten().unsqueeze(1)# + self.G @ self.u
+            return self.F @ self.x# + self.G @ self.u
         except RuntimeError:
             print("Dimensions don't match!")
             return
@@ -258,8 +277,8 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        self.eps_v = self.y - self.g()
-        self.eps_x = Diff(self.x, self.n, self.e_sim+1) - self.f(self.x, self.u, self.a)
+        self.eps_v = self.y - self.g(self.x, self.u, self.a)
+        self.eps_x = Diff(self.x, (self.sim+1), (self.e_sim+1)) - self.f(self.x, self.u, self.a)
         self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
@@ -300,18 +319,20 @@ class layer():
             self.dx = self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)
             self.x = self.x + self.dt * self.dx
         elif method == 1:
-            inputs = (self.x, self.u, self.a)
+            # inputs = (self.x, self.u, self.a)
             # print(inputs)
-            self.J = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-            self.J_x = self.J[0].squeeze()                                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            self.J = self.df        # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+            self.J_x = self.J[0].squeeze()                                                              # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
             self.J_a = self.J[2].squeeze()
             # print(self.J_x)
             # print(self.J_a)
-            print(self.f(self.x, self.u, self.a))
+            # print(self.f(self.x, self.u, self.a))
 
-            self.dx = dx_ll(self.dt, self.sim, self.J_x + self.J_a, (self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
+            self.dx = dx_ll(self.dt, self.J_x + self.J_a, self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
+            self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1) = self.dx.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1)
 
+            # print(self.dx)
             self.x = self.x + self.dt * self.dx
             # GM.u = GM.u + dt * du
         else:
@@ -320,7 +341,7 @@ class layer():
         
         # for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
         #     self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
-        # self.y = self.g() + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
     def updateGeneralisedCoordinates(self, i):
         ### from spm_ADEM_diff
@@ -332,36 +353,48 @@ class layer():
         # end
         # u.v{n}  = dg.dv*u.v{n} + dg.dx*u.x{n} + dg.da*u.a{n} + u.z{n};
 
+        # f = self.f(self.x, self.u, self.a)
+        # g = self.g(self.x, self.u, self.a)
+
         inputs = (self.x, self.u, self.a)
-        dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
-        df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
+        self.dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
+        self.df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
 
-        dgdx = dg[0].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
-        dgdu = dg[1].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
-        dgda = dg[2].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
-        dfdx = df[0].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
-        dfdu = df[1].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
-        dfda = df[2].squeeze().flatten(start_dim=1)[0:self.sim+1, 0:self.sim+1]
+        self.dgdx = self.dg[0].squeeze()[0:self.sim+1, 0:self.sim+1]
+        self.dgdu = self.dg[1].squeeze()[0:self.sim+1, 0:self.sim+1]
+        self.dgda = self.dg[2].squeeze()[0:self.sim+1, 0:self.sim+1]
+        self.dfdx = self.df[0].squeeze()[0:self.sim, 0:self.sim]
+        self.dfdu = self.df[1].squeeze()[0:self.sim, 0:self.sim]
+        self.dfda = self.df[2].squeeze()[0:self.sim, 0:self.sim]
 
-        print(self.x)
-        print(self.f(self.x, self.u, self.a))
+        # print(self.x[1:self.sim+1])
+        # print(self.f(self.x, self.u, self.a)[:self.sim])
+        # print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim])
 
+        # print(self.x)
 
-        print(self.x[:,0])
-        print(self.f(self.x, self.u, self.a)[:,0])
-        print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1])
+        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
+        self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
 
-        self.x[1:self.sim+1] = self.f(self.x, self.u, self.a)[:self.sim] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim-1]              # FIXME: decide where to put noise w, 1) inside f (remove last part) or 2) outside f (remove w from list of parameters of f)
-        self.y[0:self.sim] = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]                 # Pytorch doesn't like in-place operations for gradients, so see next line..
-        # y = self.g(self.x, self.u, self.a)[:self.sim] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:self.sim]
+        # print(self.x)
 
-        for j in range(1,self.e_sim+1):
-            aaaa = self.x[j*self.sim-1:(j+1)*self.sim-1] 
-            aaa = dfdx * self.x[j*self.sim:(j+1)*self.sim-1] 
-            # self.x[j*self.sim+1:(j+1)*self.sim] = 
-            # + dfdu * self.u[j*self.sim:(j+1)*self.sim-1] + dfda * self.a[j*self.sim:(j+1)*self.sim-1] + self.C @ self.w.noise[i,j*self.sim:(j+1)*self.sim-1].unsqueeze(1)
-            self.y[j*self.sim:(j+1)*self.sim] = dgdx * self.y[j*self.sim:(j+1)*self.sim] + dgdu * self.x[j*self.sim:(j+1)*self.sim] + dgda * self.u[j*self.sim:(j+1)*self.sim] + self.H @ self.z.noise[i,j*self.sim:(j+1)*self.sim].unsqueeze(1)
-        self.y[self.e_sim*self.sim:] = dg[0] * self.y[self.e_sim*self.sim:] + dg[1] * self.x[self.e_sim*self.sim:] + dg[2] * self.u[self.e_sim*self.sim:] + self.H @ self.z.noise[i,self.e_sim*self.sim:].unsqueeze(1)
+        for j in range(1,self.e_sim):
+            # a = self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)]
+            # print(a)
+            # aa = self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            # print(aa)
+            # aaa = dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            # print(dfdx)
+            # print(aaa)
+
+            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            # print(self.y)
+            self.y[j*(self.sim+1):(j+1)*(self.sim+1)] = self.dgdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)]
+            # print(self.y)
+        # print(self.y[(self.e_sim)*(self.sim+1):])
+        self.y[(self.e_sim)*(self.sim+1):] = self.dgdx @ self.x[(self.e_sim)*(self.sim+1):] + self.dgdu @ self.u[(self.e_sim)*(self.sim+1):] + self.dgda @ self.a[(self.e_sim)*(self.sim+1):] + (self.H @ self.z.noise[i,:].unsqueeze(1))[(self.e_sim)*(self.sim+1):]
+        # print(self.x)
+        # print(self.y)
 
 
     

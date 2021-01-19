@@ -12,5 +12,5 @@ import torch
 # 1) Iacus, Stefano M. Simulation and inference for stochastic differential equations: with R examples. Springer Science & Business Media, 2009.
 # 2) Panik, Michael J. Stochastic Differential Equations: An Introduction with Applications in Population Dynamics Modeling. John Wiley & Sons, 2017.
 
-def dx_ll(t, n, J, f):
-    return (torch.matrix_exp(t * J) - torch.eye(n)) @ J.pinverse() @ f
+def dx_ll(t, J, f):
+    return (torch.matrix_exp(t * J) - torch.eye(len(J))) @ J.pinverse() @ f
