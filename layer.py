@@ -241,8 +241,11 @@ class layer():
             # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
 
             f = (self.A @ xR + self.B_u @ uR + self.B_a @ aR)
-
+            
             fPadded = torch.nn.functional.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
+            # print(fPadded)
+            fPadded[-1,:] = xR[-2,:]
+            # print(fPadded)
 
             result = fPadded.t().flatten().unsqueeze(1)
 
@@ -330,7 +333,8 @@ class layer():
             # print(self.J_x)
             # print(self.J_a)
             # print(self.f(self.x, self.u, self.a))
-            # print(self.x)
+            print(self.x)
+            print(Diff(self.x, self.sim+1, self.e_sim+1))
             self.dx = dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
             # print(Diff(self.x, self.sim+1, self.e_sim+1))
             # print(self.J_x + self.J_a)
@@ -377,9 +381,9 @@ class layer():
         # print(self.f(self.x, self.u, self.a)[:self.sim])
         # print((self.C @ self.w.noise[i,:].unsqueeze(1))[:self.sim])
 
-        print(self.x)
-        print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1].shape)
-        print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1])
+        # print(self.x)
+        # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1].shape)
+        # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1])
 
         self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
         self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
