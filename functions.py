@@ -45,7 +45,11 @@ def Diff(x, dimension, embeddings, shift=1):
 
 
 
-def f(x, u, a, A, B_u, B_a):
+
+# def functionsf(x, u, a, A, B_u, B_a):
+
+
+def modelf(x, u, a, A, B_u, B_a):
     # TODO: generalise this to include nonlinear treatments
     try:
         return A @ x + B_u @ u + B_a @ a
