@@ -233,18 +233,23 @@ class layer():
             # # print(aa.t().shape)
             # print(aa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t())
 
+            # print(self.x)
             xR = self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            # print(xR)
             uR = self.u.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            # print(uR)
             aR = self.a.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+            # print(aR)
 
             # Alternative (easier to debug?) below:
             # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
 
             f = (self.A @ xR + self.B_u @ uR + self.B_a @ aR)
+            # print(f)
             
             fPadded = torch.nn.functional.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
             # print(fPadded)
-            fPadded[-1,:] = xR[-2,:]
+            # fPadded[-1,:] = xR[-2,:]
             # print(fPadded)
 
             result = fPadded.t().flatten().unsqueeze(1)
@@ -335,7 +340,8 @@ class layer():
             # print(self.f(self.x, self.u, self.a))
             print(self.x)
             print(Diff(self.x, self.sim+1, self.e_sim+1))
-            self.dx = dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1))                # FIXME: I believe this line is not taking into account 'a' properly, please check Jacobian J_x
+            # self.dx = dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1))                # FIXME: Find a way to replace self.dx with self.x[1:]
+            # se
             # print(Diff(self.x, self.sim+1, self.e_sim+1))
             # print(self.J_x + self.J_a)
             # print(self.x)
@@ -343,7 +349,7 @@ class layer():
             # self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1) = self.dx.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1)
 
             # print(self.dx)
-            self.x = self.x + self.dt * self.dx
+            self.x = self.x + self.dt * Diff(self.x, self.sim+1, self.e_sim+1)
             # GM.u = GM.u + dt * du
         else:
             print('Method not implemented. Please check and try a different method.')
@@ -385,7 +391,10 @@ class layer():
         # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1].shape)
         # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1])
 
+        print(self.x)
+        print(self.x[1:(self.sim+1)])
         self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
+        print(self.x)
         self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
 
         # print(self.x)
