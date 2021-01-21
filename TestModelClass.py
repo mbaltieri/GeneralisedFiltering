@@ -17,7 +17,7 @@ else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
 dt = 1
-T = 20
+T = 120
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -43,12 +43,12 @@ A = torch.tensor([[0., 1.], [0., 0.]], device=DEVICE)                 # state tr
 B_a = torch.tensor([[0., 0.], [0., 1.]], device=DEVICE)               # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
-sigma_z_log = torch.tensor([-8.], device=DEVICE)                                     # log-precision
+sigma_z_log = torch.tensor([0.], device=DEVICE)                                     # log-precision
 sigma_z = torch.exp(sigma_z_log)
 Sigma_z = torch.tensor([[sigma_z, 0., 0.], [0., sigma_z, 0.], 
-            [0., 0, 0.]], device=DEVICE)                                       # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
+            [0., 0, sigma_z]], device=DEVICE)                                       # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
 
-sigma_w_log = torch.tensor([-8.], device=DEVICE)                                     # log-precision
+sigma_w_log = torch.tensor([0.], device=DEVICE)                                     # log-precision
 sigma_w = torch.exp(sigma_w_log)
 Sigma_w = torch.tensor([[0., 0.], [0., sigma_w]], device=DEVICE)
 
@@ -60,23 +60,23 @@ beta = torch.exp(torch.tensor([1.]))
 
 A_gm = torch.tensor([[0., 1.], [-alpha, -alpha2]], device=DEVICE)    # state transition matrix
 B_u_gm = torch.tensor([[beta, 0.], [0., beta]], device=DEVICE)    # input matrix (dynamics)
-F_gm = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 0.]], device=DEVICE)               # observation matrix
+F_gm = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)               # observation matrix
 
-sigma_z_log_GM = torch.tensor([6.], device=DEVICE)                                  # log-precision
+sigma_z_log_GM = torch.tensor([3.], device=DEVICE)                                  # log-precision
 sigma_z_GM = torch.exp(sigma_z_log_GM)
 Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
             [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
 
-sigma_w_log_GM = torch.tensor([-4.], device=DEVICE)                                 # log-precision
+sigma_w_log_GM = torch.tensor([-8.], device=DEVICE)                                 # log-precision
 sigma_w_GM = torch.exp(sigma_w_log_GM)
 Sigma_w_GM = torch.tensor([[sigma_w_GM, 0.], [0., sigma_w_GM]], device=DEVICE)
 
-sigma_v_log_GM = torch.tensor([-8.], device=DEVICE)                                 # log-precision
+sigma_v_log_GM = torch.tensor([-16.], device=DEVICE)                                 # log-precision
 sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.exp(torch.tensor([8.]))*torch.tensor([[0., 0., 0.], [1., 1., 0.], [0., 0., 0.]], device=DEVICE)
+dyda = torch.tensor([[0., 0., 0.], [0., 1., 1.], [0., 0., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                            # desired state
 
 ## create models
@@ -108,6 +108,8 @@ for i in range(0,iterations-1):
     dFdx = dF[1].squeeze().unsqueeze(1)
     dFdu = dF[2].squeeze().unsqueeze(1)
     dFda = GM.dyda @ dFdy
+    # print(GM.dyda)
+    # print(dFdy)
     # print(dFda)
 
     
@@ -116,13 +118,10 @@ for i in range(0,iterations-1):
     J_x = J[1][1].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
     J_u = J[2][2].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
 
-    # print(J_y)
-    # ab = kronecker(torch.eye(e_n+1), dyda)
-    # print(ab)
+    J_a = GM.dyda.t() @ J_y @ GM.dyda
+    # print(J_a)
+    # print(J_a.pinverse())
     # J_a = kronecker(torch.eye(e_n+1), dyda).t() @ J_y @ kronecker(torch.eye(e_n+1), dyda)
-    # print(J_a)
-    J_a = J_y @ kronecker(torch.eye(e_n+1), dyda)**2
-    # print(J_a)
 
     # # print('J_x: ', J_x)
     # # print('J_u: ', J_u)
@@ -137,13 +136,15 @@ for i in range(0,iterations-1):
         # integrate using Local-linearisation
         dx = dx_ll(dt, -J_x, (Diff(GM.x, GM.sim+1, GM.e_sim+1) - dFdx))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
         du = dx_ll(dt, -J_u, (Diff(GM.u, GM.sim+1, GM.e_sim+1) - dFdu))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
-        da = 1000*dx_ll(dt, -J_a, - dFda)
+        da = dx_ll(dt, -J_a, - 10*dFda)
+        # print(da)
 
         # print(da)
 
         GM.x = GM.x + dt * dx
         GM.u = GM.u + dt * du
         GP.a = GP.a + dt * da
+        # print(GP.a)
         # print(GP.a)
         # GP.a[1,0] = 50*torch.sin(torch.tensor([2*math.pi*i/100]))
         # print(GP.a)

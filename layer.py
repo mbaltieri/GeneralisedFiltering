@@ -56,14 +56,14 @@ class layer():
         # create block matrices considering higher embedding orders
         self.A = kronecker(torch.eye(self.e_sim+1), self.A)                          # state transition matrix
         self.B_u = kronecker(torch.eye(self.e_sim+1), self.B_u)                      # input matrix (external dynamics)
-        self.B_a = kronecker(torch.eye(self.e_sim+1), self.B_a)                      # input matrix (self-generated dynamics)
+        self.B_a = torch.nn.functional.pad(self.B_a, (0, self.sim*(self.e_sim+1)-len(self.B_a), 0, self.sim*(self.e_sim+1)-len(self.B_a)))                      # input matrix (self-generated dynamics)
         self.F = kronecker(torch.eye(self.e_sim+1), self.F)                          # observation matrix
         self.G = kronecker(torch.eye(self.e_sim+1), self.G)                          # input matrix (observations)
-        self.dyda = kronecker(torch.eye(self.e_sim+1), self.dyda)                 # (direct) influence of actions on observations  
+        self.dyda = torch.nn.functional.pad(self.dyda, (0, (self.sim+1)*(self.e_sim+1)-len(self.dyda), 0, (self.sim+1)*(self.e_sim+1)-len(self.dyda)))                 # (direct) influence of actions on observations
 
         # create variables
         self.y = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # observations
-        self.x = torch.normal(0, 10, size=((self.sim+1) * (self.e_sim+1), 1), requires_grad = True, device = DEVICE)          # states
+        self.x = torch.normal(0, 100, size=((self.sim+1) * (self.e_sim+1), 1), requires_grad = True, device = DEVICE)          # states
         self.u = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # inputs (GM) / external forces (GP)
         self.a = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)                         # self-produced actions (GP)
         if len(eta_u) == 0:
@@ -77,6 +77,11 @@ class layer():
                 print("Prior dimensions don't match. Please check and try again.")
                 quit()
         
+        self.fx = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)
+        self.fu = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)
+        self.fa = torch.zeros((self.sim+1) * (self.e_sim+1), 1, requires_grad = True, device = DEVICE)
+
+
         ## parameters and hyperparameters ##
         if p == 0:                                                              # if there are no parameters # TODO: in general or to learn?
             self.theta = torch.zeros(1)
@@ -244,15 +249,25 @@ class layer():
             # Alternative (easier to debug?) below:
             # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
 
-            f = (self.A @ xR + self.B_u @ uR + self.B_a @ aR)
+            fx = self.A @ xR
+            fu = self.B_u @ uR
+            fa = self.B_a @ aR
+            f = (fx + fu + fa)
             # print(f)
             
             fPadded = torch.nn.functional.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
             # print(fPadded)
-            # fPadded[-1,:] = xR[-2,:]
-            # print(fPadded)
+
+            fxPadded = torch.nn.functional.pad(fx.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+            fuPadded = torch.nn.functional.pad(fu.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+            faPadded = torch.nn.functional.pad(fa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+
+            self.fx = fxPadded.t().flatten().unsqueeze(1)
+            self.fu = fuPadded.t().flatten().unsqueeze(1)
+            self.fa = faPadded.t().flatten().unsqueeze(1)
 
             result = fPadded.t().flatten().unsqueeze(1)
+            # print(result)
 
             return result
         except RuntimeError:
@@ -309,6 +324,8 @@ class layer():
         self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian' in torch.autograd.functional
         self.u = u
 
+        # self.updateGeneralisedCoordinates(i)
+
         self.prediction_errors(i)
 
         return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
@@ -334,23 +351,53 @@ class layer():
             # print(inputs)
             self.J = self.df        # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
             self.J_x = self.J[0].squeeze()                                                              # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            self.J_u = self.J[1].squeeze()
             self.J_a = self.J[2].squeeze()
             # print(self.J_x)
             # print(self.J_a)
             # print(self.f(self.x, self.u, self.a))
-            print(self.x)
-            print(Diff(self.x, self.sim+1, self.e_sim+1))
-            # self.dx = dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1))                # FIXME: Find a way to replace self.dx with self.x[1:]
-            # se
+            # print(self.x)
+            # print(dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1)))
+            # print(Diff(dx_ll(self.dt, self.J_x + self.J_a, Diff(self.x, self.sim+1, self.e_sim+1)), self.sim+1, self.e_sim+1))
+            # print(self.J_x.pinverse())
+            # print(self.J_u.pinverse())
+            # print(self.J_a.pinverse())
+            # print(self.fx)
+            # print(self.fu)
+            # print(self.fa)
+            self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa)                # FIXME: Find a way to replace self.dx with self.x[1:]
+            # print(self.dx)
             # print(Diff(self.x, self.sim+1, self.e_sim+1))
             # print(self.J_x + self.J_a)
             # print(self.x)
             # self.du = (torch.matrix_exp(self.dt * self.J_u) - torch.eye(self.sim)) @ self.J_u.pinverse() @ ??????                         # TODO: should we implement a way to give dynamic equations for inputs too?
             # self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1) = self.dx.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[1:,:].t().flatten().unsqueeze(1)
 
+
+            # for j in range(self.e_sim+1):
+            #     print(self.x)
+            #     print(self.x[(j+1)*(self.sim+1)-1,:])
+            #     # print(self.dx)
+            #     # print(self.dx[(j+1)*(self.sim+1)-2,:])
+            #     print(self.f(self.x, self.u, self.a))
+            #     print(self.f(self.x, self.u, self.a)[(j+1)*(self.sim+1)-2])
+            #     self.x[(j+1)*(self.sim+1)-1,:] = self.f(self.x, self.u, self.a)[(j+1)*(self.sim+1)-2]
+            #     print(self.x)
+
             # print(self.dx)
-            self.x = self.x + self.dt * Diff(self.x, self.sim+1, self.e_sim+1)
+            self.x = self.x + self.dt * self.dx
+            # print(self.dx)
             # GM.u = GM.u + dt * du
+
+            # for j in range(self.e_sim+1):
+            #     print(self.x)
+            #     print(self.x[(j+1)*(self.sim+1)-1,:])
+            #     print(self.dx)
+            #     print(self.dx[(j+1)*(self.sim+1)-2,:])
+            #     print(self.f(self.x, self.u, self.a)[(j+1)*(self.sim+1)-2]
+            #     print(self.f(self.x, self.u, self.a)[(j+1)*(self.sim+1)-2]
+            #     self.x[(j+1)*(self.sim+1)-1,:] = self.dx[(j+1)*(self.sim+1)-2,:]
+            #     print(self.x)
         else:
             print('Method not implemented. Please check and try a different method.')
             quit()
@@ -372,9 +419,14 @@ class layer():
         # f = self.f(self.x, self.u, self.a)
         # g = self.g(self.x, self.u, self.a)
 
+        # print(self.x)
+
         inputs = (self.x, self.u, self.a)
+        # print(self.x)
         self.dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
+        # print(self.x)
         self.df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
+        # print(self.x)
 
         self.dgdx = self.dg[0].squeeze()[0:self.sim+1, 0:self.sim+1]
         self.dgdu = self.dg[1].squeeze()[0:self.sim+1, 0:self.sim+1]
@@ -391,10 +443,10 @@ class layer():
         # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1].shape)
         # print(self.f(self.x, self.u, self.a)[:(self.sim+1)-1])
 
-        print(self.x)
-        print(self.x[1:(self.sim+1)])
-        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
-        print(self.x)
+        # print(self.x)
+        # print(self.x[1:(self.sim+1)])
+        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
+        # print(self.x)
         self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
 
         # print(self.x)
@@ -406,10 +458,13 @@ class layer():
             # print(aa)
             # aaa = dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             # print(dfdx)
-            print(self.x)
-            print(self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)].shape)
-            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1]# + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            print(self.x)
+            # print(self.x)
+            # print(self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)].shape)
+            self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            # print(self.x)
             self.y[j*(self.sim+1):(j+1)*(self.sim+1)] = self.dgdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)]
             # print(self.y)
         # print(self.y[(self.e_sim)*(self.sim+1):])

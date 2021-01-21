@@ -14,3 +14,4 @@ import torch
 
 def dx_ll(t, J, f):
     return (torch.matrix_exp(t * J) - torch.eye(len(J))) @ J.pinverse() @ f
+    
