@@ -390,12 +390,14 @@ class layer():
         dFdy = dF[0].squeeze().unsqueeze(1)
         dFdx = dF[1].squeeze().unsqueeze(1)
         dFdu = dF[2].squeeze().unsqueeze(1)
-        dFda = self.dyda @ dFdy
+        dFda = self.dyda.t() @ dFdy
 
-        J = torch.autograd.functional.hessian(lambda y, x, u: self.free_energy(y, x, u, i=i), inputs)                         # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+        J = torch.autograd.functional.hessian(lambda y, x, u: self.free_energy(y, x, u, i=i), inputs)                         # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward + optimse code by reusing the already computed df/dx, dg/dx, etc.
         J_y = J[0][0].squeeze()
         J_x = J[1][1].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
         J_u = J[2][2].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
+
+        J_y = torch.exp(torch.tensor(-2.)) * torch.eye(*J_y.shape)
 
         J_a = self.dyda.t() @ J_y @ self.dyda
 
@@ -409,7 +411,7 @@ class layer():
             dx = dx_ll(self.dt, -J_x, (Diff(self.x, self.sim+1, self.e_sim+1) - dFdx))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
             du = dx_ll(self.dt, -J_u, (Diff(self.u, self.sim+1, self.e_sim+1) - dFdu))                                          # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
             # print(J_a.pinverse())
-            da = dx_ll(self.dt, -J_a, - 1.2*dFda)
+            da = dx_ll(self.dt, -J_a, - dFda)
 
             self.x = self.x + self.dt * dx
             self.u = self.u + self.dt * du

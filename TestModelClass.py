@@ -17,7 +17,7 @@ else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
 dt = 1
-T = 200
+T = 50
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -69,7 +69,7 @@ sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
 
-dyda = torch.tensor([[0., 0., 0.], [0., 5.5, 1.0], [0., 0., 0.]], device=DEVICE)
+dyda = torch.tensor([[0., 0., 0.], [0., 1., .0], [0., 1., 0.]], device=DEVICE)
 eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                             # desired state
 
 ## create models
