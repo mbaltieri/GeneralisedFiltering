@@ -397,9 +397,12 @@ class layer():
         J_x = J[1][1].squeeze()                                                                                       # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
         J_u = J[2][2].squeeze()                                                                                       # time, might want to switch backward --> grad and than take jacobian of grad
 
-        J_y = torch.exp(torch.tensor(-2.)) * torch.eye(*J_y.shape)
+        J_y_action = torch.exp(torch.tensor(-6.)) * torch.eye(*J_y.shape)                                               # FIXME: Low sensory precision to allow priors to dominate require a learning rate, 
+                                                                                                                        # see my old code, Karl hides this by artificially redefining sensory precision as 
+                                                                                                                        # an "action precision", see variable iG in spm_ADEM, derived from G(1).U which is 
+                                                                                                                        # either given as a parameter by the user or automatically set in spm_ADEM_M_set where the default value is exp(2) apparently
 
-        J_a = self.dyda.t() @ J_y @ self.dyda
+        J_a = self.dyda.t() @ J_y_action @ self.dyda
 
         with torch.no_grad():
             # integrate using Euler-Maruyama
