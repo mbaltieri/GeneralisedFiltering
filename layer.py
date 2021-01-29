@@ -2,7 +2,7 @@
 
 import math
 import torch
-from functions import kronecker, symsqrt, Diff
+from functions import kronecker, symsqrt, Diff, ff
 from smoothNoise import noise
 from globalVariables import DEVICE, _small
 from integrationSchemes import dx_ll
@@ -210,41 +210,41 @@ class layer():
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
 
-    def f(self, x, u, a):
-        self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
-        self.u = u
-        self.a = a
+    # def f(self, x, u, a):
+    #     self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
+    #     self.u = u
+    #     self.a = a
 
-        # TODO: generalise this to include nonlinear treatments
-        try:
-            xR = self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
-            uR = self.u.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
-            aR = self.a.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+    #     # TODO: generalise this to include nonlinear treatments
+    #     try:
+    #         xR = self.x.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+    #         uR = self.u.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
+    #         aR = self.a.squeeze().unflatten(0, (self.e_sim+1, self.sim+1)).t()[:-1,:].t().flatten().unsqueeze(1)
 
-            # Alternative (easier to debug?) below:
-            # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
+    #         # Alternative (easier to debug?) below:
+    #         # xR = self.x[Diff(Diff(self.x, self.sim+1, self.e_sim+1, shift=-1), self.sim+1, self.e_sim+1).nonzero(as_tuple=True)].unsqueeze(1)
 
-            fx = self.A @ xR
-            fu = self.B_u @ uR
-            fa = self.B_a @ aR
-            f = (fx + fu + fa)
+    #         fx = self.A @ xR
+    #         fu = self.B_u @ uR
+    #         fa = self.B_a @ aR
+    #         f = (fx + fu + fa)
             
-            fPadded = Func.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
+    #         fPadded = Func.pad(f.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))                 # without this extra padding, the Jacobian lacks dimensions since the output is otherwise based on a reduced state space
 
-            fxPadded = Func.pad(fx.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
-            fuPadded = Func.pad(fu.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
-            faPadded = Func.pad(fa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+    #         fxPadded = Func.pad(fx.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+    #         fuPadded = Func.pad(fu.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
+    #         faPadded = Func.pad(fa.squeeze().unflatten(0, (self.e_sim+1, self.sim)).t(), (0,0,0,1))
 
-            self.fx = fxPadded.t().flatten().unsqueeze(1)
-            self.fu = fuPadded.t().flatten().unsqueeze(1)
-            self.fa = faPadded.t().flatten().unsqueeze(1)
+    #         self.fx = fxPadded.t().flatten().unsqueeze(1)
+    #         self.fu = fuPadded.t().flatten().unsqueeze(1)
+    #         self.fa = faPadded.t().flatten().unsqueeze(1)
 
-            result = fPadded.t().flatten().unsqueeze(1)
+    #         result = fPadded.t().flatten().unsqueeze(1)
 
-            return result
-        except RuntimeError:
-            print("Dimensions don't match!")
-            return
+    #         return result
+    #     except RuntimeError:
+    #         print("Dimensions don't match!")
+    #         return
     
     def g(self, x, u, a):
         self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian'
@@ -276,7 +276,7 @@ class layer():
 
     def prediction_errors(self, i):
         self.eps_v = self.y - self.g(self.x, self.u, self.a)
-        self.eps_x = Diff(self.x, (self.sim+1), (self.e_sim+1)) - self.f(self.x, self.u, self.a)
+        self.eps_x = Diff(self.x, (self.sim+1), (self.e_sim+1)) - self.fGeneralisedCoordinates(self.x, self.u, self.a, i)
         self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
         self.eps_gamma = self.gamma - self.k_gamma()
@@ -313,24 +313,31 @@ class layer():
         # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
         # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
-        self.updateGeneralisedCoordinates(i)
+        inputs = (self.x, self.u, self.a)
+
+        # self.updateGeneralisedCoordinates(*inputs, i)
+        som = torch.autograd.functional.jacobian(lambda x, u, a, i=i: self.fGeneralisedCoordinates(x, u, a, i), inputs)
+        # print(som[0].squeeze())
+        # print(som[1].squeeze())
+        # print(som[2].squeeze())
 
         if method == 0:
             self.dx = self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)
             self.x = self.x + self.dt * self.dx
         elif method == 1:
+            # self.J = self.df                                                    # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+            # self.J_x = self.J[0].squeeze()                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            # self.J_u = self.J[1].squeeze()
+            # self.J_a = self.J[2].squeeze()
+
             self.J = self.df                                                    # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-            self.J_x = self.J[0].squeeze()                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-            self.J_u = self.J[1].squeeze()
-            self.J_a = self.J[2].squeeze()
-            self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa)                # TODO: put this in (block) matrix form and have it as a scalar product, as done below, but we need square matrices (i.e., padding where needed)
+            self.J_x = som[0].squeeze()                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            self.J_u = som[1].squeeze()
+            self.J_a = som[2].squeeze()
+            self.J_w = self.C                                                       # assuming the noise is linear in C #FIXME: should we use Sigma_w rather than C for discrete (is C = sqrt(Sigma_w) used only in Euler-Maruyama?)
+
+            self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa) + dx_ll(self.dt, self.J_w, self.C @ self.w.noise[i,:].unsqueeze(1))                # TODO: put this in (block) matrix form and have it as a scalar product, as done below, but we need square matrices (i.e., padding where needed)
             self.du = dx_ll(self.dt, self.J_u, self.fu)                         # TODO: should we implement a way to give dynamic equations for inputs too?
-
-            # self.J = torch.cat(self.df, 2).squeeze()
-            # self.ff = torch.cat((self.fx, self.fu, self.fa), 0)
-            # self.dx = dx_ll(self.dt, self.J, self.ff)
-
-            # 
 
             self.x = self.x + self.dt * self.dx
             # self.u = self.u + self.dt * self.du
@@ -342,7 +349,7 @@ class layer():
         #     self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
-    def updateGeneralisedCoordinates(self, i):
+    def fGeneralisedCoordinates(self, x, u, a, i):
         ### from spm_ADEM_diff
         # u.v{1}  = spm_vec(vi);
         # u.x{2}  = spm_vec(fi) + u.w{1};
@@ -352,27 +359,49 @@ class layer():
         # end
         # u.v{n}  = dg.dv*u.v{n} + dg.dx*u.x{n} + dg.da*u.a{n} + u.z{n};
 
-        inputs = (self.x, self.u, self.a)
-        self.dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
-        self.df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
+        # self.x = x                                                  # necessary because of the implementation of 'jacobian'/'hessian' in torch.autograd.functional
+        # self.u = u
+        # self.a = a
 
-        self.dgdx = self.dg[0].squeeze()[0:self.sim+1, 0:self.sim+1]
-        self.dgdu = self.dg[1].squeeze()[0:self.sim+1, 0:self.sim+1]
-        self.dgda = self.dg[2].squeeze()[0:self.sim+1, 0:self.sim+1]
-        self.dfdx = self.df[0].squeeze()[0:self.sim, 0:self.sim]
-        self.dfdu = self.df[1].squeeze()[0:self.sim, 0:self.sim]
-        self.dfda = self.df[2].squeeze()[0:self.sim, 0:self.sim]
+        # inputs = (self.x, self.u, self.a)
+        # self.dg = torch.autograd.functional.jacobian(lambda x, u, a: self.g(x, u, a), inputs)
+        # self.df = torch.autograd.functional.jacobian(lambda x, u, a: self.f(x, u, a), inputs)
 
-        self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
-        self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
+        # self.dgdx = self.dg[0].squeeze()[0:self.sim+1, 0:self.sim+1]
+        # self.dgdu = self.dg[1].squeeze()[0:self.sim+1, 0:self.sim+1]
+        # self.dgda = self.dg[2].squeeze()[0:self.sim+1, 0:self.sim+1]
+        # self.dfdx = self.df[0].squeeze()[0:self.sim, 0:self.sim]
+        # self.dfdu = self.df[1].squeeze()[0:self.sim, 0:self.sim]
+        # self.dfda = self.df[2].squeeze()[0:self.sim, 0:self.sim]
+
+        # self.x[1:(self.sim+1)] = self.f(self.x, self.u, self.a)[:(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[:(self.sim+1)-1]
+        # self.y[0:(self.sim+1)] = self.g(self.x, self.u, self.a)[:(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[:(self.sim+1)]
+
+        # for j in range(1,self.e_sim+1):
+        #     self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+        #     self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+        #     self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+        #     self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+        #     self.y[j*(self.sim+1):(j+1)*(self.sim+1)] = self.dgdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)]
+        # self.y[(self.e_sim)*(self.sim+1):] = self.dgdx @ self.x[(self.e_sim)*(self.sim+1):] + self.dgdu @ self.u[(self.e_sim)*(self.sim+1):] + self.dgda @ self.a[(self.e_sim)*(self.sim+1):] + (self.H @ self.z.noise[i,:].unsqueeze(1))[(self.e_sim)*(self.sim+1):]
+
+        inputs = (x[:self.sim], u[:self.sim], a[:self.sim])
+        self.df = torch.autograd.functional.jacobian(lambda x, u, a, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim]: ff(x, u, a, A, B_u, B_a), inputs)
+
+        self.dfdx = self.df[0][0].squeeze()
+        self.dfdu = self.df[0][1].squeeze()
+        self.dfda = self.df[0][2].squeeze()
+
+        self.fTot, self.fx[:(self.sim+1)-1], self.fu[:(self.sim+1)-1], self.fa[:(self.sim+1)-1] = ff(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
 
         for j in range(1,self.e_sim+1):
-            self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.x[j*(self.sim+1)+1:(j+1)*(self.sim+1)] = self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] + self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] + (self.C @ self.w.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.y[j*(self.sim+1):(j+1)*(self.sim+1)] = self.dgdx @ self.x[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgdu @ self.u[j*(self.sim+1):(j+1)*(self.sim+1)] + self.dgda @ self.a[j*(self.sim+1):(j+1)*(self.sim+1)] + (self.H @ self.z.noise[i,:].unsqueeze(1))[j*(self.sim+1):(j+1)*(self.sim+1)]
-        self.y[(self.e_sim)*(self.sim+1):] = self.dgdx @ self.x[(self.e_sim)*(self.sim+1):] + self.dgdu @ self.u[(self.e_sim)*(self.sim+1):] + self.dgda @ self.a[(self.e_sim)*(self.sim+1):] + (self.H @ self.z.noise[i,:].unsqueeze(1))[(self.e_sim)*(self.sim+1):]
+            self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+
+        self.f = torch.vstack((self.fTot, torch.zeros(1), self.fx[(self.sim+1):] + self.fu[(self.sim+1):] + self.fa[(self.sim+1):]))
+
+        return self.f
 
     def inferencestep(self, i):
         # Use autograd to compute the backward pass        
@@ -434,7 +463,7 @@ class layer():
         # .detach()
         # self.y.requires_grad = True
     
-    def saveHistoryVariables(self, i):                                                              # TODO: remove
+    def saveHistoryVariables(self, i):
         self.y_history[i,:] = self.y
         self.x_history[i,:] = self.x
         self.u_history[i,:] = self.u

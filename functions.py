@@ -45,10 +45,13 @@ def Diff(x, dimension, embeddings, shift=1):
 
 
 
-def f(x, u, a, A, B_u, B_a):
+def ff(x, u, a, A, B_u, B_a):
     # TODO: generalise this to include nonlinear treatments
     try:
-        return A @ x + B_u @ u + B_a @ a
+        fx = A @ x
+        fu = B_u @ u
+        fa = B_a @ a
+        return (fx + fu + fa), fx, fu, fa
     except RuntimeError:
         print("Dimensions don't match!")
         return

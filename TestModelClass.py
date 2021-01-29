@@ -17,7 +17,7 @@ else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
 dt = 1
-T = 50
+T = 150
 iterations = int(T/dt)
 
 l = 3                               # number of layers
@@ -55,7 +55,7 @@ A_gm = torch.tensor([[0., 1.], [-alpha, -alpha2]], device=DEVICE)               
 B_u_gm = torch.tensor([[beta, 0.], [0., beta]], device=DEVICE)                      # input matrix (dynamics)
 F_gm = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)      # observation matrix
 
-sigma_z_log_GM = torch.tensor([2.5], device=DEVICE)                                  # log-precision
+sigma_z_log_GM = torch.tensor([1.5], device=DEVICE)                                  # log-precision
 sigma_z_GM = torch.exp(sigma_z_log_GM)
 Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
             [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
