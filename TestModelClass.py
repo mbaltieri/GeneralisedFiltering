@@ -17,7 +17,7 @@ else:
     torch.set_default_tensor_type(torch.DoubleTensor)
 
 dt = 1
-T = 150
+T = 50
 iterations = int(T/dt)
 
 l = 3                               # number of layers
