@@ -32,7 +32,7 @@ e_h = 0                             # embedding dimension hyperparameters
 ## generative process
 
 A = torch.tensor([[0., 1.], [0., 0.]], device=DEVICE)                               # state transition matrix
-A = torch.tensor([[0., 1.], [-2., -1.]], device=DEVICE)                             # state transition matrix
+# A = torch.tensor([[0., 1.], [-2., -1.]], device=DEVICE)                             # state transition matrix
 B_a = torch.tensor([[0., 0.], [0., 1.]], device=DEVICE)                             # input matrix (dynamics)
 F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)         # observation matrix
 
@@ -60,11 +60,11 @@ sigma_z_GM = torch.exp(sigma_z_log_GM)
 Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
             [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
 
-sigma_w_log_GM = torch.tensor([-16.], device=DEVICE)                                 # log-precision
+sigma_w_log_GM = torch.tensor([-8.], device=DEVICE)                                 # log-precision
 sigma_w_GM = torch.exp(sigma_w_log_GM)
 Sigma_w_GM = torch.tensor([[sigma_w_GM, 0.], [0., sigma_w_GM]], device=DEVICE)
 
-sigma_v_log_GM = torch.tensor([-32.], device=DEVICE)                                # log-precision
+sigma_v_log_GM = torch.tensor([-16.], device=DEVICE)                                # log-precision
 sigma_v_GM = torch.exp(sigma_v_log_GM)
 Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
             [0., 0, sigma_v_GM]], device=DEVICE)
