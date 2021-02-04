@@ -2,7 +2,7 @@
 
 import math
 import torch
-from functions import kronecker, symsqrt, Diff, ff
+from functions import kronecker, symsqrt, Diff, ff, ffSeparateComponents
 from smoothNoise import noise
 from globalVariables import DEVICE, _small
 from integrationSchemes import dx_ll
@@ -155,29 +155,32 @@ class layer():
 
     def history(self):
         # TODO: this should be used with parsimony to avoid the RAM blowing up for big models
-        self.y_history = torch.zeros(self.iterations, *self.y.shape, device = DEVICE)
-        self.x_history = torch.zeros(self.iterations, *self.x.shape, device = DEVICE)
-        self.u_history = torch.zeros(self.iterations, *self.u.shape, device = DEVICE)
-        self.a_history = torch.zeros(self.iterations, *self.a.shape, device = DEVICE)
-        self.eta_u_history = torch.zeros(self.iterations, *self.eta_u.shape, device = DEVICE)
+        self.y_history = torch.zeros(self.iterations, *self.y.shape, device = DEVICE, requires_grad=False)
+        self.x_history = torch.zeros(self.iterations, *self.x.shape, device = DEVICE, requires_grad=False)
+        self.u_history = torch.zeros(self.iterations, *self.u.shape, device = DEVICE, requires_grad=False)
+        self.a_history = torch.zeros(self.iterations, *self.a.shape, device = DEVICE, requires_grad=False)
+        self.eta_u_history = torch.zeros(self.iterations, *self.eta_u.shape, device = DEVICE, requires_grad=False)
 
         if self.flag == 'GP':
+            self.w_history = torch.zeros(*self.w.noise.shape, device = DEVICE, requires_grad=False)
+            self.z_history = torch.zeros(*self.z.noise.shape, device = DEVICE, requires_grad=False)
+
             self.w_history = self.z.noise
             self.z_history = self.w.noise
 
-        self.F_history = torch.zeros(self.iterations, 1, device = DEVICE)
+        self.F_history = torch.zeros(self.iterations, 1, device = DEVICE, requires_grad=False)
 
-        self.eps_v_history = torch.zeros(*self.y_history.shape, device = DEVICE)
-        self.eps_x_history = torch.zeros(*self.x_history.shape, device = DEVICE)
-        self.eps_eta_history = torch.zeros(*self.u_history.shape, device = DEVICE)
-        self.eps_theta_history = torch.zeros(self.iterations, *self.theta.shape, device = DEVICE)
-        self.eps_gamma_history = torch.zeros(self.iterations, *self.gamma.shape, device = DEVICE)
+        self.eps_v_history = torch.zeros(*self.y_history.shape, device = DEVICE, requires_grad=False)
+        self.eps_x_history = torch.zeros(*self.x_history.shape, device = DEVICE, requires_grad=False)
+        self.eps_eta_history = torch.zeros(*self.u_history.shape, device = DEVICE, requires_grad=False)
+        self.eps_theta_history = torch.zeros(self.iterations, *self.theta.shape, device = DEVICE, requires_grad=False)
+        self.eps_gamma_history = torch.zeros(self.iterations, *self.gamma.shape, device = DEVICE, requires_grad=False)
 
-        self.xi_v_history = torch.zeros(*self.eps_v_history.shape, device = DEVICE)
-        self.xi_x_history = torch.zeros(*self.eps_x_history.shape, device = DEVICE)
-        self.xi_eta_history = torch.zeros(*self.eps_eta_history.shape, device = DEVICE)
-        self.xi_theta_history = torch.zeros(*self.eps_theta_history.shape, device = DEVICE)
-        self.xi_gamma_history = torch.zeros(*self.eps_gamma_history.shape, device = DEVICE)
+        self.xi_v_history = torch.zeros(*self.eps_v_history.shape, device = DEVICE, requires_grad=False)
+        self.xi_x_history = torch.zeros(*self.eps_x_history.shape, device = DEVICE, requires_grad=False)
+        self.xi_eta_history = torch.zeros(*self.eps_eta_history.shape, device = DEVICE, requires_grad=False)
+        self.xi_theta_history = torch.zeros(*self.eps_theta_history.shape, device = DEVICE, requires_grad=False)
+        self.xi_gamma_history = torch.zeros(*self.eps_gamma_history.shape, device = DEVICE, requires_grad=False)
 
     def checkControl(self):
         if len(self.B_u) == 0:
@@ -316,7 +319,7 @@ class layer():
         inputs = (self.x, self.u, self.a)
 
         # self.updateGeneralisedCoordinates(*inputs, i)
-        som = torch.autograd.functional.jacobian(lambda x, u, a, i=i: self.fGeneralisedCoordinates(x, u, a, i), inputs)
+        self.som = torch.autograd.functional.jacobian(lambda x, u, a, i=i: self.fGeneralisedCoordinates(x, u, a, i), inputs)
         # print(som[0].squeeze())
         # print(som[1].squeeze())
         # print(som[2].squeeze())
@@ -330,10 +333,10 @@ class layer():
             # self.J_u = self.J[1].squeeze()
             # self.J_a = self.J[2].squeeze()
 
-            self.J = self.df                                                    # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-            self.J_x = som[0].squeeze()                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-            self.J_u = som[1].squeeze()
-            self.J_a = som[2].squeeze()
+            # self.J = self.df                                                    # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
+            self.J_x = self.som[0].squeeze()                                      # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            self.J_u = self.som[1].squeeze()
+            self.J_a = self.som[2].squeeze()
             self.J_w = self.C                                                       # assuming the noise is linear in C #FIXME: should we use Sigma_w rather than C for discrete (is C = sqrt(Sigma_w) used only in Euler-Maruyama?)
 
             self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa) + dx_ll(self.dt, self.J_w, self.C @ self.w.noise[i,:].unsqueeze(1))                # TODO: put this in (block) matrix form and have it as a scalar product, as done below, but we need square matrices (i.e., padding where needed)
@@ -345,8 +348,8 @@ class layer():
             print('Method not implemented. Please check and try a different method.')
             quit()
         
-        # for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
-        #     self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
+        for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
+            self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
     def fGeneralisedCoordinates(self, x, u, a, i):
@@ -387,14 +390,16 @@ class layer():
 
         inputs = (x[:self.sim], u[:self.sim], a[:self.sim])
         self.df = torch.autograd.functional.jacobian(lambda x, u, a, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim]: ff(x, u, a, A, B_u, B_a), inputs)
+        # print(self.df)
 
-        self.dfdx = self.df[0][0].squeeze()
-        self.dfdu = self.df[0][1].squeeze()
-        self.dfda = self.df[0][2].squeeze()
+        self.dfdx = self.df[0].squeeze()
+        self.dfdu = self.df[1].squeeze()
+        self.dfda = self.df[2].squeeze()
 
-        self.fTot, self.fx[:(self.sim+1)-1], self.fu[:(self.sim+1)-1], self.fa[:(self.sim+1)-1] = ff(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
+        self.fTot = ff(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
+        self.fx[:(self.sim+1)-1], self.fu[:(self.sim+1)-1], self.fa[:(self.sim+1)-1] = ffSeparateComponents(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
 
-        for j in range(1,self.e_sim+1):
+        for j in range(1,self.e_sim+1):             # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
             self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]

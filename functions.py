@@ -48,10 +48,19 @@ def Diff(x, dimension, embeddings, shift=1):
 def ff(x, u, a, A, B_u, B_a):
     # TODO: generalise this to include nonlinear treatments
     try:
+        fx, fu, fa = ffSeparateComponents(x, u, a, A, B_u, B_a)
+        return (fx + fu + fa)
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
+
+def ffSeparateComponents(x, u, a, A, B_u, B_a):
+    # TODO: generalise this to include nonlinear treatments
+    try:
         fx = A @ x
         fu = B_u @ u
         fa = B_a @ a
-        return (fx + fu + fa), fx, fu, fa
+        return fx, fu, fa
     except RuntimeError:
         print("Dimensions don't match!")
         return
