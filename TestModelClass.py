@@ -55,7 +55,7 @@ A_gm = torch.tensor([[0., 1.], [-alpha, -alpha2]], device=DEVICE)               
 B_u_gm = torch.tensor([[beta, 0.], [0., beta]], device=DEVICE)                      # input matrix (dynamics)
 F_gm = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)      # observation matrix
 
-sigma_z_log_GM = torch.tensor([6.5], device=DEVICE)                                  # log-precision
+sigma_z_log_GM = torch.tensor([2.5], device=DEVICE)                                  # log-precision
 sigma_z_GM = torch.exp(sigma_z_log_GM)
 Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
             [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
@@ -87,6 +87,7 @@ for i in range(0,iterations-1):
 
     GM.inferencestep(i)
     GP.a = GM.a
+    # GP.a[1] = 100*torch.sin(torch.tensor(2*math.pi*i/10))
 
     GP.saveHistoryVariables(i)
     GM.saveHistoryVariables(i)

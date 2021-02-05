@@ -293,9 +293,6 @@ class layer():
             self.J_a = self.J[2].squeeze()
             self.J_w = self.C                                                               # assuming the noise is linear in C #FIXME: should we use Sigma_w rather than C for discrete (is C = sqrt(Sigma_w) used only in Euler-Maruyama?)
 
-            print(dx_ll(self.dt, self.J_x, self.fx))
-            print(dx_ll(self.dt, self.J_a, self.fa))
-
             self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa) + dx_ll(self.dt, self.J_w, self.C @ self.w.noise[i,:].unsqueeze(1))                # TODO: put this in (block) matrix form and have it as a scalar product, as done below, but we need square matrices (i.e., padding where needed)
             self.du = dx_ll(self.dt, self.J_u, self.fu)                                     # TODO: should we implement a way to give dynamic equations for inputs too?
 
@@ -306,7 +303,7 @@ class layer():
             quit()
         
         for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
-            self.x[self.sim*(j+1)-1] = self.dx[self.sim*(j+1)-2]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
+            self.x[self.sim*(j+1)] = self.dx[self.sim*(j+1)-1]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
     def fGenCoord(self, x, u, a, i):
