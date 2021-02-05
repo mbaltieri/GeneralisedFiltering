@@ -10,3 +10,7 @@ __pycache__/Functions.cpython-37 (16.96.35.dhcp.bnf.brain.riken.jp's conflicted 
 __pycache__/Functions.cpython-37 (16.96.35.dhcp.bnf.brain.riken.jp's conflicted copy 2021-01-18).pyc
 __pycache__/globalVariables.cpython-37.pyc
 __pycache__/integrationSchemes.cpython-37.pyc
+src/__pycache__/__init__.cpython-37.pyc
+src/__pycache__/colorednoise.cpython-37.pyc
+src/__pycache__/globals.cpython-37.pyc
+src/__pycache__/integrationschemes.cpython-37.pyc
