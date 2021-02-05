@@ -12,7 +12,8 @@ torch.set_default_dtype(torch.float64)
 ### FUNCTIONS ###
 
 def symsqrt(matrix):                # code from https://github.com/pytorch/pytorch/issues/25481, while we still wait for sqrtm
-                                    # SVD > Cholemsky since the obtained "square root" is symmetric, and not lower or upper triangular
+                                    # SVD > (?) Cholemsky since the obtained "square root" is symmetric, and not lower or upper triangular
+                                    # FIXME: find out if we should use Cholemsky instead https://www.gaussianwaves.com/2013/11/simulation-and-analysis-of-white-noise-in-matlab/
     """Compute the square root of a positive definite matrix."""
     _, s, v = matrix.svd()
     good = s > s.max(-1, True).values * s.size(-1) * torch.finfo(s.dtype).eps
@@ -34,12 +35,12 @@ def kronecker(A, B):                # code from https://discuss.pytorch.org/t/kr
 
 
 def Diff(x, dimension, embeddings, shift=1):
-    # D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))    # TODO: torch does not support arbitrary diagonal shifts for the 'eye' function, numpy does
+    # D = kronecker(torch.eye(embeddings), torch.from_numpy(np.eye(dimension, k = shift)))                  # torch does not yet support arbitrary shifts of the diagonal for the 'eye' function, numpy does, TODO: find better workaround?
     offdiag = torch.diag(torch.ones(dimension), diagonal=shift)
     if shift >= 0:
-        D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])    # TODO: find better workaround
+        D = kronecker(torch.eye(embeddings), offdiag[:-shift,:-shift])
     else:
-        D = kronecker(torch.eye(embeddings), offdiag[:shift,:shift])    # TODO: find better workaround
+        D = kronecker(torch.eye(embeddings), offdiag[:shift,:shift])
     return D @ x
 
 

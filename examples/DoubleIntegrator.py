@@ -1,73 +1,89 @@
-import torch
-import matplotlib.pyplot as plt
-from layer import *
-from integrationSchemes import dx_ll
-import math
+import sys
+import pathlib
 
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
+import src.functions
+from src.layer import *
+from src.integrationschemes import dx_ll
+from src.globals import DEVICE
+
+import matplotlib.pyplot as plt
+
+# torch.autograd.set_detect_anomaly(True)
 torch.set_printoptions(precision=10)
+# print(torch.__version__)
 
 print("Device in use:", DEVICE)
 
 # torch.manual_seed(42)
 
+# if torch.cuda.is_available():
+#     torch.set_default_tensor_type(torch.cuda.DoubleTensor)
+# else:
+#     torch.set_default_tensor_type(torch.DoubleTensor)
+
+# torch.set_default_dtype(torch.float64)                                                                # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse, can we do without specifying dtype all the time?
+
 dt = 1
-T = 100
+T = 50
 iterations = int(T/dt)
 
-e_n = 1                             # embedding dimension hidden states
+l = 3                               # number of layers
 
-### Wisker model
+e_n = 1                             # embedding dimension hidden states
+e_r = 0                             # embedding dimension inputs
+e_p = 0                             # embedding dimension parameters
+e_h = 0                             # embedding dimension hyperparameters
+
+### Test double integrator
 
 ## generative process
-omega2 = 0.5
 
-A = torch.tensor([[0., 1], [-omega2, 0]])
-B_a = torch.tensor([[0., 0.], [0., 1.]], device=DEVICE)
-B_u = torch.tensor([[0., 0.], [0., 1.]], device=DEVICE)
-F = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)
+A = torch.tensor([[0, 1], [0, 0]], dtype=torch.float64, device=DEVICE)                                  # state transition matrix
+# A = torch.tensor([[0, 1], [-2, -1]], dtype=torch.float64, device=DEVICE)                              # state transition matrix
+B_a = torch.tensor([[0, 0], [0, 1]], dtype=torch.float64, device=DEVICE)                                # input matrix (dynamics)
+F = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=torch.float64, device=DEVICE)                 # observation matrix
 
-sigma_z_log = torch.tensor([-4.], device=DEVICE)                                     # log-precision
+sigma_z_log = torch.tensor([0], dtype=torch.float64, device=DEVICE)                                     # log-precision
 sigma_z = torch.exp(sigma_z_log)
-Sigma_z = torch.tensor([[sigma_z, 0., 0.], [0., sigma_z, 0.], 
-            [0., 0, sigma_z]], device=DEVICE)
+Sigma_z = torch.tensor([[sigma_z, 0, 0], [0, sigma_z, 0], 
+            [0, 0, sigma_z]], dtype=torch.float64, device=DEVICE)
 
-sigma_w_log = torch.tensor([-4.], device=DEVICE)                                     # log-precision
+sigma_w_log = torch.tensor([0], dtype=torch.float64, device=DEVICE)                                     # log-precision
 sigma_w = torch.exp(sigma_w_log)
-Sigma_w = torch.tensor([[0., 0.], [0., sigma_w]], device=DEVICE)
-
+Sigma_w = torch.tensor([[0, 0], [0, sigma_w]], dtype=torch.float64, device=DEVICE)
 
 
 ## generative model
-alpha = torch.exp(torch.tensor([1.]))
-alpha2 = torch.exp(torch.tensor([1.]))
-beta = torch.exp(torch.tensor([1.]))
+alpha = torch.exp(torch.tensor([1], dtype=torch.float64))
+alpha2 = torch.exp(torch.tensor([1], dtype=torch.float64))
+beta = torch.exp(torch.tensor([1], dtype=torch.float64))
 
-A_gm = torch.tensor([[0., 1.], [-alpha, -alpha2]], device=DEVICE)                   # state transition matrix
-# A_gm = A
-B_u_gm = torch.tensor([[0, 0.], [0., 1]], device=DEVICE)                      # input matrix (dynamics)
-F_gm = torch.tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], device=DEVICE)      # observation matrix
+A_gm = torch.tensor([[0, 1], [-alpha, -alpha2]], dtype=torch.float64, device=DEVICE)                    # state transition matrix
+B_u_gm = torch.tensor([[beta, 0], [0, beta]], device=DEVICE)                                            # input matrix (dynamics)
+F_gm = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=torch.float64, device=DEVICE)              # observation matrix
 
-sigma_z_log_GM = torch.tensor([-16.], device=DEVICE)                                  # log-precision
+sigma_z_log_GM = torch.tensor([2.5], dtype=torch.float64, device=DEVICE)                                # log-precision
 sigma_z_GM = torch.exp(sigma_z_log_GM)
-Sigma_z_GM = torch.tensor([[sigma_z_GM, 0., 0.], [0., sigma_z_GM, 0.], 
-            [0., 0, sigma_z_GM]], device=DEVICE)                                    # TODO: tensor type deault is 'int64' when no dot is used, but need float for pseudo-inverse
+Sigma_z_GM = torch.tensor([[sigma_z_GM, 0, 0], [0, sigma_z_GM, 0], 
+            [0, 0, sigma_z_GM]], dtype=torch.float64, device=DEVICE)
 
-sigma_w_log_GM = torch.tensor([-8.], device=DEVICE)                                 # log-precision
+sigma_w_log_GM = torch.tensor([-8], dtype=torch.float64, device=DEVICE)                                 # log-precision
 sigma_w_GM = torch.exp(sigma_w_log_GM)
-Sigma_w_GM = torch.tensor([[sigma_w_GM, 0.], [0., sigma_w_GM]], device=DEVICE)
+Sigma_w_GM = torch.tensor([[sigma_w_GM, 0], [0, sigma_w_GM]], dtype=torch.float64, device=DEVICE)
 
-sigma_v_log_GM = torch.tensor([16.], device=DEVICE)                                # log-precision
+sigma_v_log_GM = torch.tensor([-16], dtype=torch.float64, device=DEVICE)                                # log-precision
 sigma_v_GM = torch.exp(sigma_v_log_GM)
-Sigma_v_GM = torch.tensor([[sigma_v_GM, 0., 0.], [0., sigma_v_GM, 0.], 
-            [0., 0, sigma_v_GM]], device=DEVICE)
+Sigma_v_GM = torch.tensor([[sigma_v_GM, 0, 0], [0, sigma_v_GM, 0], 
+            [0, 0, sigma_v_GM]], dtype=torch.float64, device=DEVICE)
 
-dyda = torch.tensor([[0., 0., 0.], [0., 1., 1.], [0., 0., 0.]], device=DEVICE)
-eta_u = torch.tensor([[0.], [0.], [0.]], device=DEVICE)                             # desired state
+dyda = 10*torch.tensor([[0, 0, 0], [0, 1, 0], [0, 1, 0]], dtype=torch.float64, device=DEVICE)           # in his code, Karl uses dyda as derived from the generative process
+eta_u = torch.tensor([[0], [0], [0]], dtype=torch.float64, device=DEVICE)                               # desired state
 
-
-GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a, B_u=B_u)
+## create models
+GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
 GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
-
 
 for i in range(0,iterations-1):
     print(i)
@@ -75,17 +91,12 @@ for i in range(0,iterations-1):
     GP.step(i)
     GM.setObservations(GP.y)
 
-    # # calculate loss
+    # calculate loss
     F = GM.free_energy(GM.y, GM.x, GM.u, i)
 
     GM.inferencestep(i)
-    # GP.a = GM.a
-    
-    if (i > iterations/3) and (i < 2*iterations/3):
-        GP.A[1, 1] = -.02
-        GP.u[1] = 30*(i-iterations/3)/iterations
-    if (i >= 2*iterations/3):
-        GP.A[1, 1] = 0.
+    GP.a = GM.a
+    # GP.a[1] = 100*torch.sin(torch.tensor(2*math.pi*i/10))
 
     GP.saveHistoryVariables(i)
     GM.saveHistoryVariables(i)
@@ -95,20 +106,6 @@ plt.plot(GM.y_history[:-1,0].detach(), GM.y_history[:-1,1].detach(), 'b')
 plt.plot(GM.y_history[0,0].detach(), GM.y_history[0,1].detach(), 'bo')
 plt.plot(GM.x_history[:-1,0].detach(), GM.x_history[:-1,1].detach(), 'r')
 plt.plot(GM.x_history[0,0].detach(), GM.x_history[0,1].detach(), 'ro')
-
-figU = plt.figure(figsize=(15,5))
-ax1 = figU.add_subplot(131)
-ax2 = figU.add_subplot(132)
-ax3 = figU.add_subplot(133)
-
-ax1.plot(range(iterations-1), GP.u_history[:-1,0].detach(), 'b')
-ax1.plot(range(iterations-1), GM.u_history[:-1,0].detach(), 'r')
-
-ax2.plot(range(iterations-1), GP.u_history[:-1,1].detach(), 'b')
-ax2.plot(range(iterations-1), GM.u_history[:-1,1].detach(), 'r')
-
-ax3.plot(range(iterations-1), GP.u_history[:-1,2].detach(), 'b')
-ax3.plot(range(iterations-1), GM.u_history[:-1,2].detach(), 'r')
 
 fig = plt.figure(figsize=(15,5))
 ax1 = fig.add_subplot(131)
@@ -129,6 +126,7 @@ ax3.plot(range(iterations-1), GM.y_history[:-1,2].detach(), 'b')
 ax3.plot(range(iterations-1), GM.x_history[:-1,2].detach(), 'r')
 ax3.plot(range(iterations-1), GP.x_history[:-1,2].detach(), 'k')
 ax3.plot(range(iterations-1), GM.u_history[:-1,2].detach(), 'g')
+
 
 fig1 = plt.figure()
 ax1 = fig1.add_subplot(111)
@@ -173,5 +171,6 @@ ax2.plot(range(iterations-1), GM.xi_x_history[:-1,2].detach(), 'k')
 ax3.plot(range(iterations-1), GM.xi_eta_history[:-1,0].detach(), 'b')
 ax3.plot(range(iterations-1), GM.xi_eta_history[:-1,1].detach(), 'r')
 ax3.plot(range(iterations-1), GM.xi_eta_history[:-1,2].detach(), 'k')
+
 
 plt.show()

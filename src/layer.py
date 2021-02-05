@@ -2,18 +2,13 @@
 
 import math
 import torch
-from functions import kronecker, symsqrt, Diff, ff, ffSeparateComponents
-from smoothNoise import noise
-from globalVariables import DEVICE, _small
-from integrationSchemes import dx_ll
+from src.functions import kronecker, symsqrt, Diff, ff, ffSeparateComponents
+from src.colorednoise import noise
+from src.globals import DEVICE, _small
+from src.integrationschemes import dx_ll
+
 import torch.nn.functional as Func
 from torch.autograd.functional import jacobian, hessian
-
-# class odeSolver():
-#     def __init__(self):
-        # TODO: write the code for the local linearisation method (Ozaki)
-        # TODO: write the code for some simpler ODE-SDE solver https://github.com/rtqichen/torchdiffeq
-        # https://pypi.org/project/DESolver/ http://docs.pyro.ai/en/stable/contrib.tracking.html#module-pyro.contrib.tracking.extended_kalman_filter
 
 
 class layer():
@@ -271,15 +266,12 @@ class layer():
         return .5 * (self.eps_v.t() @ self.xi_v + self.eps_x.t() @ self.xi_x + self.eps_eta.t() @ self.xi_eta + \
                             self.eps_theta.t() @ self.xi_theta + self.eps_gamma.t() @ self.xi_gamma + \
                             ((self.n + self.r + self.p + self.h) * torch.log(2*torch.tensor([[math.pi]])) - torch.logdet(self.Pi_z) - torch.logdet(self.Pi_w) - \
-                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())           # TODO: add more terms due to the variational Gaussian approximation?
+                            torch.logdet(self.Pi_theta) - torch.logdet(self.Pi_gamma)).sum())           # TODO: are there more terms due to the variational Gaussian approximation?
 
     def step(self, i, method=1):
         # methods:
-        # 0: Euler-Maruyama
+        # 0: Euler-Maruyama (removed)
         # 1: Local linearisation (Ozaki '92)
-
-        # TODO: The following code works (?) for linear functions (and not nonlinear ones) in virtue of the fact that generalised coordinates for linear models are trivial; for nonlinear models, see snippet "from spm_ADEM_diff"
-        # TODO: for nonlinear systems, higher embedding orders of y, x, v should contain derivatives of functions f and g
 
         if method == 0:
             self.dx = self.f(self.x, self.u, self.a) + self.C @ self.w.noise[i,:].unsqueeze(1)
@@ -291,9 +283,11 @@ class layer():
             self.J_x = self.J[0].squeeze()                                                  # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
             self.J_u = self.J[1].squeeze()
             self.J_a = self.J[2].squeeze()
-            self.J_w = self.C                                                               # assuming the noise is linear in C #FIXME: should we use Sigma_w rather than C for discrete (is C = sqrt(Sigma_w) used only in Euler-Maruyama?)
+            self.J_w = self.C                                                               # assuming the noise is linear in C 
+                                                                                            # FIXME: should we use Sigma_w rather than C for discrete (is C = sqrt(Sigma_w) used only in Euler-Maruyama?) I don't think, but please check this again
 
-            self.dx = dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + dx_ll(self.dt, self.J_a, self.fa) + dx_ll(self.dt, self.J_w, self.C @ self.w.noise[i,:].unsqueeze(1))                # TODO: put this in (block) matrix form and have it as a scalar product, as done below, but we need square matrices (i.e., padding where needed)
+            self.dx = (dx_ll(self.dt, self.J_x, self.fx) + dx_ll(self.dt, self.J_u, self.fu) + 
+                      dx_ll(self.dt, self.J_a, self.fa) + dx_ll(self.dt, self.J_w, self.C @ self.w.noise[i,:].unsqueeze(1)))                # TODO: put this in (block) matrix form and have it as a scalar product, as Friston does
             self.du = dx_ll(self.dt, self.J_u, self.fu)                                     # TODO: should we implement a way to give dynamic equations for inputs too?
 
             self.x = self.x + self.dt * self.dx
@@ -303,11 +297,13 @@ class layer():
             quit()
         
         for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
-            self.x[self.sim*(j+1)] = self.dx[self.sim*(j+1)-1]                            # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
+            self.x[self.sim*(j+1)] = self.dx[self.sim*(j+1)-1]                              # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
         self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
 
     def fGenCoord(self, x, u, a, i):
+        
         ### from spm_ADEM_diff
+        #
         # u.v{1}  = spm_vec(vi);
         # u.x{2}  = spm_vec(fi) + u.w{1};
         # for i = 2:(n - 1)
@@ -326,7 +322,7 @@ class layer():
         self.fTot = ff(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
         self.fx[:(self.sim+1)-1], self.fu[:(self.sim+1)-1], self.fa[:(self.sim+1)-1] = ffSeparateComponents(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
 
-        for j in range(1,self.e_sim+1):                                                 # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
+        for j in range(1,self.e_sim+1):                                                     # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
             self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
             self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
@@ -337,7 +333,7 @@ class layer():
 
     def inferencestep(self, i):
         # Use autograd to compute the backward pass        
-        # F.backward()                                                                  # not feasible if we need Jacobians/Hessians later for Ozaki LL
+        # F.backward()                                                                      # not feasible if we need Jacobians/Hessians later for Ozaki LL
 
         inputs = (self.y, self.x, self.u)
 
@@ -353,15 +349,16 @@ class layer():
         dFdu = dF[2].squeeze().unsqueeze(1)
         dFda = self.dyda.t() @ dFdy
 
-        J = hessian(lambda y, x, u: self.free_energy(y, x, u, i=i), inputs)             # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward + optimse code by reusing the already computed df/dx, dg/dx, etc.
+        J = hessian(lambda y, x, u: self.free_energy(y, x, u, i=i), inputs)                 # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward + 
+                                                                                            # optimise code by reusing the already computed df/dx, dg/dx, etc.
         J_y = J[0][0].squeeze()
-        J_x = J[1][1].squeeze()                                                         # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
-        J_u = J[2][2].squeeze()                                                         # time, might want to switch backward --> grad and than take jacobian of grad
+        J_x = J[1][1].squeeze()                                                             # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+        J_u = J[2][2].squeeze()                                                             # time, might want to switch backward --> grad and than take jacobian of grad
 
-        J_y_action = torch.exp(torch.tensor(-6.)) * torch.eye(*J_y.shape)               # FIXME: Low sensory precision to allow priors to dominate require a learning rate, 
-                                                                                        # see my old code, Karl hides this by artificially redefining sensory precision as 
-                                                                                        # an "action precision", see variable iG in spm_ADEM, derived from G(1).U which is 
-                                                                                        # either given as a parameter by the user or automatically set in spm_ADEM_M_set where the default value is exp(2) apparently
+        J_y_action = torch.exp(torch.tensor(-6.)) * torch.eye(*J_y.shape)                   # FIXME: Low sensory precision to allow priors to dominate require a learning rate, 
+                                                                                            # see my old code, Karl hides this by artificially redefining sensory precision as 
+                                                                                            # an "action precision", see variable iG in spm_ADEM, derived from G(1).U which is 
+                                                                                            # either given as a parameter by the user or automatically set in spm_ADEM_M_set where the default value is exp(2) apparently
 
         J_a = self.dyda.t() @ J_y_action @ self.dyda
 
@@ -372,8 +369,8 @@ class layer():
             # GP.a = GP.a + dt * (- dFda)
 
             # integrate using Local-linearisation
-            dx = dx_ll(self.dt, -J_x, (Diff(self.x, self.sim+1, self.e_sim+1) - dFdx))  # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
-            du = dx_ll(self.dt, -J_u, (Diff(self.u, self.sim+1, self.e_sim+1) - dFdu))  # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
+            dx = dx_ll(self.dt, -J_x, (Diff(self.x, self.sim+1, self.e_sim+1) - dFdx))      # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
+            du = dx_ll(self.dt, -J_u, (Diff(self.u, self.sim+1, self.e_sim+1) - dFdu))      # NB: J --> - J since this is a minimisation of F, unlike the maximisation of -F in DEM and HMB
             da = dx_ll(self.dt, -J_a, - dFda)
 
             self.x = self.x + self.dt * dx
@@ -386,10 +383,10 @@ class layer():
             self.u.grad = None
 
             # self.y.requires_grad = True
-            self.x.requires_grad = True                                                 # TODO: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
-            self.u.requires_grad = True                                                 # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
+            self.x.requires_grad = True                                                     # TODO: Definitely ugly, find a better way to deal with this (earlier, we had updates of the form GM.x[i+1] = GM.x[i] + ... 
+            self.u.requires_grad = True                                                     # but this requires "i" as a parameter of the loss funciton, and "torch.autograd.functional.hessian" accepts only tensors as inputs)
     
-    def setObservations(self, y):                                                       # TODO: check if there's a more elegant way of doing this
+    def setObservations(self, y):                                                           # TODO: check if there's a more elegant way of doing this
         self.y = y
         # .detach()
         # self.y.requires_grad = True
