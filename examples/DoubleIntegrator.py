@@ -96,7 +96,6 @@ for i in range(0,iterations-1):
 
     GM.inferencestep(i)
     GP.a = GM.a
-    # GP.a[1] = 100*torch.sin(torch.tensor(2*math.pi*i/10))
 
     GP.saveHistoryVariables(i)
     GM.saveHistoryVariables(i)

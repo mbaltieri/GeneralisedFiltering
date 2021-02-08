@@ -14,3 +14,5 @@ src/__pycache__/__init__.cpython-37.pyc
 src/__pycache__/colorednoise.cpython-37.pyc
 src/__pycache__/globals.cpython-37.pyc
 src/__pycache__/integrationschemes.cpython-37.pyc
+src/__pycache__/functions.cpython-37.pyc
+src/__pycache__/layer.cpython-37.pyc
