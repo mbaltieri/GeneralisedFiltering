@@ -12,7 +12,7 @@ from torch.autograd.functional import jacobian, hessian
 
 
 class layer():
-    def __init__(self, flag, T, dt, A, F, B_u=[], B_a=[], G=[], Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=.5, dyda=[], eta_u=[]):
+    def __init__(self, flag, T, dt, A, F, g, B_u=[], B_a=[], G=[], Sigma_w=[], Sigma_z=[], Sigma_v=[], D=0, E=0, p=0, h=0, e_n=0, e_r=0, e_p=0, e_h=0, phi=.5, dyda=[], eta_u=[]):
         self.flag = flag
 
         self.T = T
@@ -26,6 +26,9 @@ class layer():
 
         self.m = len(F)                                                         # observations dimension
         self.n = len(A)                                                         # hidden states dimension (n+1 variables for n equations)
+
+        ## observation function
+        self.g = g
 
         self.A = A
         self.B_u = B_u
@@ -208,18 +211,6 @@ class layer():
         if self.F.size(0) != self.H.size(0):
             print('Measurement matrix and measurement noise matrix sizes don\'t match. Please check and try again.')
             quit()
-    
-    def g(self, x, u, a):
-        self.x = x                                                                          # necessary because of the implementation of 'jacobian'/'hessian' in torch.autograd.functional, requiring explicit variables for differentiation
-        self.u = u
-        self.a = a
-
-        # TODO: generalise this to include nonlinear treatments
-        try:
-            return self.F @ self.x + self.G @ self.u
-        except RuntimeError:
-            print("Dimensions don't match!")
-            return
 
     def k_theta(self):                                                                      # TODO: for simplicity we hereby assume that parameters are independent of other variables
         # TODO: generalise this to include nonlinear treatments
@@ -238,7 +229,7 @@ class layer():
             return
 
     def prediction_errors(self, i):
-        self.eps_v = self.y - self.g(self.x, self.u, self.a)
+        self.eps_v = self.y - self.g(self.x, self.u, self.a, self.F, self.G)
         self.eps_x = Diff(self.x, (self.sim+1), (self.e_sim+1)) - self.fGenCoord(self.x, self.u, self.a, i)
         self.eps_eta = self.u - self.eta_u
         self.eps_theta = self.theta - self.k_theta()
@@ -298,7 +289,26 @@ class layer():
         
         for j in range(self.e_sim+1):                                                       # In a dynamic model with x, x', x'', x''', ..., the last variable does not get updated during integration, i.e., \dot{x} => x = x + x' = x + f(x)
             self.x[self.sim*(j+1)] = self.dx[self.sim*(j+1)-1]                              # \dot{x'} => x' = x' + x'' = x' + f(x') but x'' = f(x') (there is no x'' = x'' + x''' = x'' + f(x'') equation)
-        self.y = self.g(self.x, self.u, self.a) + self.H @ self.z.noise[i,:].unsqueeze(1)
+        self.y = self.g(self.x, self.u, self.a, self.F, self.G) + self.H @ self.z.noise[i,:].unsqueeze(1)
+
+    def gGenCoord(self, x, u, a, i):
+        inputs = (x[:self.sim], u[:self.sim], a[:self.sim])
+
+        self.df = jacobian(lambda x, u, a, F=self.F[:self.sim,:self.sim], G=self.G[:self.sim,:self.sim]: self.g(x, u, a, F, G), inputs)
+
+        self.dgdx = self.df[0].squeeze()
+        self.dgdu = self.df[1].squeeze()
+        self.dgda = self.df[2].squeeze()
+
+        self.gTot = self.g(*inputs, F=self.F[:self.sim,:self.sim], G=self.G[:self.sim,:self.sim])
+        self.gx[:(self.sim+1)], self.gu[:(self.sim+1)], self.ga[:(self.sim+1)] = ffSeparateComponents(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
+
+        for j in range(1,self.e_sim+1):                                                     # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
+            self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+
+        self.f = torch.vstack((self.fTot, torch.zeros(1), self.fx[(self.sim+1):] + self.fu[(self.sim+1):] + self.fa[(self.sim+1):]))
 
     def fGenCoord(self, x, u, a, i):
         
@@ -321,6 +331,10 @@ class layer():
 
         self.fTot = ff(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
         self.fx[:(self.sim+1)-1], self.fu[:(self.sim+1)-1], self.fa[:(self.sim+1)-1] = ffSeparateComponents(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
+        # self.fx[:(self.sim+1)-1] = self.fTot
+        # self.fu[:(self.sim+1)-1] = self.fTot
+        # self.fa[:(self.sim+1)-1] = self.fTot
+
 
         for j in range(1,self.e_sim+1):                                                     # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
             self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]

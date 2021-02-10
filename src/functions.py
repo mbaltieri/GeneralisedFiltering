@@ -65,3 +65,11 @@ def ffSeparateComponents(x, u, a, A, B_u, B_a):
     except RuntimeError:
         print("Dimensions don't match!")
         return
+
+# def g(x, u, a, F, G):
+#     # TODO: generalise this to include nonlinear treatments
+#     try:
+#         return F @ x + G @ u
+#     except RuntimeError:
+#         print("Dimensions don't match!")
+#         return

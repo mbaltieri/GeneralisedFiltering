@@ -29,3 +29,4 @@ Regarding nonlinear functions support, the number one priority at the moment, th
 
 ### TODO (one day...):
 - provide some interface with torch.nn so to exploit the full potential of pytorch's neural networks in HDMs
+- look into other SDE solvers (although LL might be a fantastic choice actually, moving everything to discrete time with time increments whose intepretation is arbitrarily small but with a finite implementation); for example see ['torchsde'](https://github.com/google-research/torchsde)

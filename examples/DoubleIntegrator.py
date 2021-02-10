@@ -16,7 +16,7 @@ torch.set_printoptions(precision=10)
 
 print("Device in use:", DEVICE)
 
-# torch.manual_seed(42)
+torch.manual_seed(42)
 
 # if torch.cuda.is_available():
 #     torch.set_default_tensor_type(torch.cuda.DoubleTensor)
@@ -54,6 +54,14 @@ sigma_w_log = torch.tensor([0], dtype=torch.float64, device=DEVICE)             
 sigma_w = torch.exp(sigma_w_log)
 Sigma_w = torch.tensor([[0, 0], [0, sigma_w]], dtype=torch.float64, device=DEVICE)
 
+def g(x, u, a, F, G):
+    # TODO: generalise this to include nonlinear treatments
+    try:
+        return F @ x + G @ u
+    except RuntimeError:
+        print("Dimensions don't match!")
+        return
+
 
 ## generative model
 alpha = torch.exp(torch.tensor([1], dtype=torch.float64))
@@ -82,8 +90,8 @@ dyda = 10*torch.tensor([[0, 0, 0], [0, 1, 0], [0, 1, 0]], dtype=torch.float64, d
 eta_u = torch.tensor([[0], [0], [0]], dtype=torch.float64, device=DEVICE)                               # desired state
 
 ## create models
-GP = layer('GP', T, dt, A=A, F=F, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
-GM = layer('GM', T, dt, A=A_gm, F=F_gm, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
+GP = layer('GP', T, dt, A=A, F=F, g=g, Sigma_w=Sigma_w, Sigma_z=Sigma_z, e_n=e_n, B_a=B_a)
+GM = layer('GM', T, dt, A=A_gm, F=F_gm, g=g, Sigma_w=Sigma_w_GM, Sigma_z=Sigma_z_GM, Sigma_v=Sigma_v_GM, e_n=e_n, dyda=dyda, B_u=B_u_gm, eta_u=eta_u)
 
 for i in range(0,iterations-1):
     print(i)
