@@ -271,7 +271,7 @@ class layer():
             inputs = (self.x, self.u, self.a)
 
             self.J = jacobian(lambda x, u, a, i=i: self.fGenCoord(x, u, a, i), inputs)      # TODO: wait for a decent implementation of 'hessian' and 'jacobian' on all inputs similar to backward
-            self.J_x = self.J[0].squeeze()                                                  # (at the moment both functions rely on grad, which requires specifying inputs). If not, to save some 
+            self.J_x = self.J[0].squeeze()                                                  # (at the moment both functions rely on grad, which requires specifying inputs). If not, maybe have a single array with all variables?
             self.J_u = self.J[1].squeeze()
             self.J_a = self.J[2].squeeze()
             self.J_w = self.C                                                               # assuming the noise is linear in C 
@@ -304,9 +304,9 @@ class layer():
         self.gx[:(self.sim+1)], self.gu[:(self.sim+1)], self.ga[:(self.sim+1)] = ffSeparateComponents(*inputs, A=self.A[:self.sim,:self.sim], B_u=self.B_u[:self.sim,:self.sim], B_a=self.B_a[:self.sim,:self.sim])
 
         for j in range(1,self.e_sim+1):                                                     # skipping the first row for each embedding order since dynamic models are in the form of x[1] = f(x[0]) and x[0] is simply the integral of x[1]
-            self.fx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.fu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
-            self.fa[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dfda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.gx[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dgdx @ x[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.gu[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dgdu @ u[j*(self.sim+1):(j+1)*(self.sim+1)-1]
+            self.ga[j*(self.sim+1):(j+1)*(self.sim+1)-1] = self.dgda @ a[j*(self.sim+1):(j+1)*(self.sim+1)-1]
 
         self.f = torch.vstack((self.fTot, torch.zeros(1), self.fx[(self.sim+1):] + self.fu[(self.sim+1):] + self.fa[(self.sim+1):]))
 

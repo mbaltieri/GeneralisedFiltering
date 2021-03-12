@@ -31,7 +31,7 @@ iterations = int(T/dt)
 
 l = 3                               # number of layers
 
-e_n = 1                             # embedding dimension hidden states
+e_n = 0                             # embedding dimension hidden states
 e_r = 0                             # embedding dimension inputs
 e_p = 0                             # embedding dimension parameters
 e_h = 0                             # embedding dimension hyperparameters
