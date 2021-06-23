@@ -117,7 +117,7 @@ The current issues are:
 2. the current structure is limiting and will only allow (nonlinear) functions in the form f(x,u,a) = f(x) + f(u) + f(a) because of the computation of the Jacobians in the Local Linearisation step (what should J_x, J_u, J_a actually be multiplied by?)
 3. the speed for differentiating these functions is not great at the moment, and it gets worse for an increasing number of iterations (is the computational graph growing for some reason? should some operations be within torch.no_grad()? ...)
 
-As suggested by Conor Heins @conorheins, the key might to move to a fully matrix update of every equation, i.e., instead of
+As suggested by Conor Heins [@conorheins](https://github.com/conorheins), the key might to move to a fully matrix update of every equation, i.e., instead of
 
 xdot = A x + B u
 
